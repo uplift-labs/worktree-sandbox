@@ -64,8 +64,10 @@ sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]
 | `--ttl`           | no       | `3600`                | Marker TTL (stale reclaim) |
 | `--branch-prefix` | no       | `sandbox-session-*`   | Glob for orphan branch sweep |
 
-**Phases:** prune metadata → reclaim stale markers → clean merged worktrees →
-sweep orphan branches → sweep residual dirs.
+**Phases:** prune metadata → reclaim stale markers (TTL) → proactive marker
+release for merged+clean sandboxes (ignores TTL, closes the crashed-session
+immortal-orphan gap) → clean merged worktrees → sweep orphan branches →
+sweep residual dirs.
 
 **Exit:** always `0`. Prints a multi-line report on stdout if any action was
 taken; silent otherwise.
