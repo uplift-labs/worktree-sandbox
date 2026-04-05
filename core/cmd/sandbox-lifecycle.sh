@@ -6,7 +6,7 @@
 #
 # Contract:
 #   --repo           main repo path
-#   --ttl            marker TTL for stale-reclaim (default 3600)
+#   --ttl            marker TTL for stale-reclaim (default 5)
 #   --branch-prefix  glob for orphan branch sweep (default 'sandbox-session-*')
 #
 # Phases:
@@ -33,7 +33,7 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 
 usage() { printf 'usage: sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]\n' >&2; exit 2; }
 
-REPO=""; TTL=3600; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
+REPO=""; TTL=5; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)          REPO="$2"; shift 2 ;;
@@ -61,9 +61,35 @@ LINES=""
 # Phase 1: prune stale git worktree metadata
 sb_wt_prune_metadata "$GIT_ROOT"
 
-# Phase 2: TTL reclaim — drop markers older than $TTL (crashed sessions)
+# Phase 2: TTL reclaim — drop markers older than $TTL (crashed sessions).
+# Per-marker loop instead of bulk find: respects heartbeat sidecar PID and
+# applies a grace period for freshly-created markers (heartbeat may not have
+# started yet).
 if [ -d "$MARKERS_DIR" ]; then
-  sb_marker_prune_stale "$MARKERS_DIR/*" "$TTL"
+  for mf in "$MARKERS_DIR"/*; do
+    [ -f "$mf" ] || continue
+    [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
+
+    # If heartbeat sidecar exists and its PID is alive, session is live — skip.
+    if [ -f "${mf}.hb" ]; then
+      _hb_pid=$(cat "${mf}.hb" 2>/dev/null)
+      if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
+        continue
+      fi
+    fi
+
+    # Grace period: marker created < 30s ago — heartbeat may not have started yet.
+    _created=$(sb_marker_read_epoch "$mf")
+    _now=$(date +%s)
+    if [ -n "$_created" ] && [ $((_now - _created)) -lt 30 ]; then
+      continue
+    fi
+
+    # Standard TTL check on mtime.
+    if ! sb_marker_is_fresh "$mf" "$TTL"; then
+      rm -f "$mf" "${mf}.hb" 2>/dev/null || true
+    fi
+  done
 fi
 
 # Phase 3: proactive marker release for merged+clean sandboxes.
@@ -90,6 +116,16 @@ fi
 if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
   for mf in "$MARKERS_DIR"/*; do
     [ -f "$mf" ] || continue
+    [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
+
+    # If heartbeat sidecar exists and its PID is alive, session is live — skip.
+    if [ -f "${mf}.hb" ]; then
+      _hb_pid=$(cat "${mf}.hb" 2>/dev/null)
+      if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
+        continue
+      fi
+    fi
+
     _branch=$(sb_marker_read_value "$mf")
     [ -z "$_branch" ] && continue
     _sb="$GIT_ROOT/$WT_DIR/$_branch"
@@ -123,7 +159,7 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     # longer load-bearing.
     if git -C "$_sb" merge-base --is-ancestor "$_branch" "$MAIN_BRANCH" 2>/dev/null \
        && sb_scan_uncommitted "$_sb" >/dev/null 2>&1; then
-      rm -f "$mf" 2>/dev/null || true
+      rm -f "$mf" "${mf}.hb" 2>/dev/null || true
     fi
   done
 fi
@@ -134,6 +170,7 @@ PROTECTED=""
 if [ -d "$MARKERS_DIR" ]; then
   for mf in "$MARKERS_DIR"/*; do
     [ -f "$mf" ] || continue
+    [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
     v=$(sb_marker_read_value "$mf")
     [ -n "$v" ] && PROTECTED="$PROTECTED $v "
   done

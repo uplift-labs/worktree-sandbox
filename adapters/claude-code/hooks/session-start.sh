@@ -30,6 +30,12 @@ if [ "$SOURCE" = "compact" ]; then
     BR=$(awk '{print $1}' "$MARKERS_DIR/$SESSION" 2>/dev/null)
     if [ -n "$BR" ] && [ -d "$REPO/.sandbox/worktrees/$BR" ]; then
       printf '[sandbox] Sandbox (re-injected): %s/.sandbox/worktrees/%s — use this root for all file ops.\n' "$REPO" "$BR"
+      # Re-launch heartbeat — previous one died with the old process.
+      _MARKER="$MARKERS_DIR/$SESSION"
+      nohup bash "$ROOT/core/lib/heartbeat.sh" \
+        --pid "$PPID" --marker "$_MARKER" \
+        </dev/null >/dev/null 2>&1 &
+      disown 2>/dev/null || true
     fi
   fi
   exit 0
@@ -42,5 +48,14 @@ LC_OUT=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" 2>/dev/null |
 # Then create this session's sandbox
 if SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION" 2>&1) && [ -n "$SB" ]; then
   printf '[sandbox] Sandbox: %s — use this root for all file ops.\n' "$SB"
+
+  # Launch heartbeat — keeps marker fresh while Claude Code ($PPID) is alive.
+  _MARKER="$REPO/.git/sandbox-markers/$SESSION"
+  if [ -f "$_MARKER" ]; then
+    nohup bash "$ROOT/core/lib/heartbeat.sh" \
+      --pid "$PPID" --marker "$_MARKER" \
+      </dev/null >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  fi
 fi
 exit 0

@@ -18,6 +18,12 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
   v0.x — absent in legacy markers). The initial HEAD lets lifecycle Phase 3
   distinguish "session never committed" from "session committed and merged"
   when both leave branch == main. Markers are auto-expired via TTL.
+- **Heartbeat sidecar:** `<marker-path>.hb`. Contains the PID of the
+  background heartbeat process. The heartbeat touches the marker every 1s
+  while the owning process (Claude Code) is alive; when the PID dies, the
+  heartbeat exits and the marker's mtime freezes. Lifecycle Phases 2 and 3
+  check the sidecar PID before reclaiming a marker — a live heartbeat PID
+  means the session is active regardless of TTL.
 - **Worktree location:** `<repo-root>/.sandbox/worktrees/<branch-name>`.
 
 ## Commands
@@ -64,13 +70,14 @@ sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]
 | Flag              | Required | Default               | Description              |
 |-------------------|----------|-----------------------|--------------------------|
 | `--repo`          | yes      | —                     | Main repo path           |
-| `--ttl`           | no       | `3600`                | Marker TTL (stale reclaim) |
+| `--ttl`           | no       | `5`                   | Marker TTL (stale reclaim) |
 | `--branch-prefix` | no       | `sandbox-session-*`   | Glob for orphan branch sweep |
 
-**Phases:** prune metadata → reclaim stale markers (TTL) → proactive marker
-release for merged+clean sandboxes (ignores TTL, closes the crashed-session
-immortal-orphan gap) → clean merged worktrees → sweep orphan branches →
-sweep residual dirs.
+**Phases:** prune metadata → reclaim stale markers (TTL, with heartbeat
+sidecar PID check and 30s grace period for freshly-created markers) →
+proactive marker release for merged+clean sandboxes (with heartbeat
+sidecar PID check; ignores TTL, closes the crashed-session immortal-orphan
+gap) → clean merged worktrees → sweep orphan branches → sweep residual dirs.
 
 **Exit:** always `0`. Prints a multi-line report on stdout if any action was
 taken; silent otherwise.
@@ -97,10 +104,10 @@ load-bearing — don't collapse them:
 
 | Hook           | Script              | Role                                                                 |
 |----------------|---------------------|----------------------------------------------------------------------|
-| `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox. |
+| `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox, launch background heartbeat to keep marker fresh while Claude Code PID is alive. |
 | `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
 | `Stop`         | `stop.sh`           | **Per-turn read-only gate + marker heartbeat.** Never merges, never cleans. Emits `{"decision":"block",...}` if the worktree is unmergeable so the agent gets a chance to fix it on the next turn. |
-| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (1) capture-commit any pending tracked mods + untracked files in the current sandbox (excluding `TASK.md`) so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
+| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, (1) capture-commit any pending tracked mods + untracked files in the current sandbox (excluding `TASK.md`) so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
 
 **Why the split:** Claude Code's `Stop` hook fires after every agent turn,
 not at session end. Any merge or cleanup in `Stop` would destroy a live

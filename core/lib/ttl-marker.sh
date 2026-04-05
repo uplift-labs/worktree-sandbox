@@ -8,8 +8,9 @@
 # never committed anything" when both leave branch == main.
 #
 # The TTL is always passed explicitly by the caller — no hardcoded defaults.
-# Crashed sessions leave immortal markers that block automated cleanup; TTL
-# is the only safe escape hatch.
+# With the heartbeat system (core/lib/heartbeat.sh), mtime is refreshed every
+# 1s while the owning process is alive. Lifecycle checks the heartbeat sidecar
+# PID (<marker>.hb) before applying TTL — a live heartbeat overrides staleness.
 #
 # Public functions:
 #   sb_marker_write <path> <value> [<initial_head>]
