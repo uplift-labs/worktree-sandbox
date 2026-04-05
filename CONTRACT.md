@@ -85,6 +85,22 @@ missing.
 
 **Exit:** `0` ok to merge / `1` blocked (reason on stdout) / `2` bad usage.
 
+## Adapter responsibilities (Claude Code)
+
+The Claude Code adapter wires four hooks. Stop vs SessionEnd split is
+load-bearing — don't collapse them:
+
+| Hook           | Script              | Role                                                                 |
+|----------------|---------------------|----------------------------------------------------------------------|
+| `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox. |
+| `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
+| `Stop`         | `stop.sh`           | **Per-turn read-only gate + marker heartbeat.** Never merges, never cleans. Emits `{"decision":"block",...}` if the worktree is unmergeable so the agent gets a chance to fix it on the next turn. |
+| `SessionEnd`   | `session-end.sh`    | **Graduation point.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...) runs the merge gate, merges the branch into main, drops the marker, and invokes `sandbox-lifecycle`. On `clear` / `compact` reasons it only heartbeats the marker — the session is continuing. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net to reclaim. |
+
+**Why the split:** Claude Code's `Stop` hook fires after every agent turn,
+not at session end. Merging on `Stop` would destroy a live sandbox mid
+conversation the first time `TASK.md` is fully checked.
+
 ## Library functions
 
 Source files under `core/lib/` are not part of the public contract. They are

@@ -51,7 +51,7 @@ assert_contains "reason mentions TASK.md" "TASK.md" "$OUT"
 # Sandbox must still exist after block
 assert_dir_exists "sandbox preserved on block" "$SB_PATH"
 
-echo "== stop: after filling TASK.md and committing real work, merge succeeds =="
+echo "== stop: after filling TASK.md and committing real work, gate passes but sandbox stays alive =="
 echo "work content" > "$SB_PATH/work.txt"
 (cd "$SB_PATH" && git add work.txt && git commit -q -m "feat: add work")
 cat > "$SB_PATH/TASK.md" << 'TM'
@@ -65,7 +65,26 @@ TM
 OUT=$(printf '%s' "$STOP_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/stop.sh" 2>&1)
 ec=$?
 assert_exit "stop exits 0 after fix" 0 "$ec"
-assert_not_contains "no block" "\"decision\":\"block\"" "$OUT"
+assert_not_contains "no block on passing gate" "\"decision\":\"block\"" "$OUT"
+# New invariant: Stop must NOT graduate. Sandbox, marker, and untouched main stay put.
+assert_dir_exists "sandbox preserved on Stop" "$SB_PATH"
+assert_file_exists "marker preserved on Stop" "$REPO/.git/sandbox-markers/$SESSION"
+assert_file_absent "main untouched on Stop" "$REPO/work.txt"
+
+echo "== session-end: reason=clear is a no-op (only heartbeat) =="
+CLEAR_IN=$(printf '{"session_id":"%s","reason":"clear"}' "$SESSION")
+OUT=$(printf '%s' "$CLEAR_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-end.sh" 2>&1)
+ec=$?
+assert_exit "session-end clear exits 0" 0 "$ec"
+assert_dir_exists "sandbox preserved on clear" "$SB_PATH"
+assert_file_exists "marker preserved on clear" "$REPO/.git/sandbox-markers/$SESSION"
+assert_file_absent "main untouched on clear" "$REPO/work.txt"
+
+echo "== session-end: reason=prompt_input_exit graduates the sandbox =="
+EXIT_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$SESSION")
+OUT=$(printf '%s' "$EXIT_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-end.sh" 2>&1)
+ec=$?
+assert_exit "session-end exit exits 0" 0 "$ec"
 assert_file_exists "work merged into main" "$REPO/work.txt"
 assert_dir_absent "sandbox cleaned up" "$SB_PATH"
 assert_file_absent "marker cleaned up" "$REPO/.git/sandbox-markers/$SESSION"

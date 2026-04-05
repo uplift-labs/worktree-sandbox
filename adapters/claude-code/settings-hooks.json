@@ -30,6 +30,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.sandbox/adapter/hooks/session-end.sh"
+          }
+        ]
+      }
     ]
   }
 }

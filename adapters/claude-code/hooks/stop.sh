@@ -1,6 +1,9 @@
 #!/bin/bash
 # stop.sh — Claude Code Stop hook wrapper.
-# On session stop: locate sandbox → run merge-gate → merge if ok → cleanup.
+# Per-turn read-only gate: heartbeat the marker and block the turn if the
+# worktree is not in a mergeable state. Graduation (merge + cleanup) lives
+# in session-end.sh and must NOT happen here — Stop fires after every agent
+# turn, so merging here would destroy a live session mid-conversation.
 
 set -u
 [ "${CI:-}" = "true" ] && exit 0
@@ -22,7 +25,11 @@ MARKER="$REPO/.git/sandbox-markers/$SESSION"
 BRANCH=$(awk '{print $1}' "$MARKER")
 SB="$REPO/.sandbox/worktrees/$BRANCH"
 
+# Heartbeat: refresh marker mtime so lifecycle's TTL reclaim treats this
+# session as live across long conversations.
 touch "$MARKER" 2>/dev/null
+
+[ -d "$SB" ] || exit 0
 
 _emit_block() {
   local raw="$1"
@@ -32,24 +39,11 @@ _emit_block() {
   printf '{"decision":"block","reason":"%s"}' "$esc"
 }
 
-if [ -d "$SB" ]; then
-  if ! reason=$(bash "$ROOT/core/cmd/sandbox-merge-gate.sh" --worktree "$SB" 2>&1); then
-    _emit_block "$reason"
-    exit 0
-  fi
-
-  # Gate passed — remove TASK.md so it does not pollute main, then merge.
-  rm -f "$SB/TASK.md" 2>/dev/null
-
-  if ! git -C "$REPO" merge-base --is-ancestor "$BRANCH" main 2>/dev/null; then
-    if ! git -C "$REPO" merge "$BRANCH" --no-edit >/dev/null 2>&1; then
-      git -C "$REPO" merge --abort >/dev/null 2>&1 || true
-      _emit_block "Merge conflict on $BRANCH — resolve manually."
-      exit 0
-    fi
-  fi
+if ! reason=$(bash "$ROOT/core/cmd/sandbox-merge-gate.sh" --worktree "$SB" 2>&1); then
+  _emit_block "$reason"
+  exit 0
 fi
 
-rm -f "$MARKER" 2>/dev/null
-bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || true
+# Gate passed — do nothing. Sandbox stays alive for the next turn; graduation
+# only happens in session-end.sh on a real session termination.
 exit 0
