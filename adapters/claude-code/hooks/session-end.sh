@@ -111,15 +111,22 @@ bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || tru
 # --- Phase 3: fast-path marker release for this session ------------------
 #
 # If our own branch is already merged into main AND the worktree is clean
-# (scan-uncommitted excludes TASK.md), drop the marker so the NEXT
-# SessionStart reaps the worktree immediately instead of waiting for the
-# 3600s TTL to expire. We cannot `git worktree remove` ourselves here —
+# (scan-uncommitted excludes TASK.md) AND there is no in-progress
+# merge/rebase/detached-HEAD state (_can_commit=1), drop the marker so the
+# NEXT SessionStart reaps the worktree immediately instead of waiting for
+# the 3600s TTL to expire. We cannot `git worktree remove` ourselves here —
 # CWD may still be inside $SB when the host tool exits.
 #
+# The _can_commit gate protects against a rare-but-catastrophic case: a
+# branch already merged into main via a different clone while the sandbox
+# has a stuck rebase/merge. Without the gate we could reap a worktree
+# mid-conflict-resolution on the next start.
+#
 # Any uncertainty (detached HEAD, missing main, dirty tree, unmerged
-# branch) falls through to the TTL safety-net.
+# branch, in-progress merge/rebase) falls through to the TTL safety-net.
 _main=$(sb_main_branch "$REPO" 2>/dev/null || true)
-if [ -n "$_main" ] \
+if [ "$_can_commit" = 1 ] \
+   && [ -n "$_main" ] \
    && git -C "$SB" merge-base --is-ancestor "$BRANCH" "$_main" 2>/dev/null \
    && sb_scan_uncommitted "$SB" >/dev/null 2>&1; then
   rm -f "$MARKER" 2>/dev/null || true
