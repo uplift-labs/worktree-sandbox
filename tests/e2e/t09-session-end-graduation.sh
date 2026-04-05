@@ -136,11 +136,12 @@ rm -f "$MARKER"
 bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
 assert_dir_absent "merged sandbox reaped by lifecycle" "$SB_PATH"
 
-echo "== SessionEnd fast-path: merged+clean branch drops own marker so next lifecycle reaps =="
+echo "== SessionEnd fast-path: merged+clean branch self-reaps within the same hook =="
 # Fresh session. The fast-path in session-end.sh should release the marker
 # if (a) branch is an ancestor of main and (b) scan-uncommitted is clean
-# and (c) no in-progress merge/rebase. Without this, the sandbox would
-# linger until the 3600s TTL expires.
+# and (c) no in-progress merge/rebase, and lifecycle (called right after)
+# must then remove the worktree in the same invocation — the user
+# should NOT see a lingering empty sandbox after closing the host tool.
 FP_SESSION="t09-fp1"
 FP_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$FP_SESSION")
 printf '%s' "$FP_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
@@ -154,23 +155,25 @@ echo "fp-payload" > "$FP_SB/fp.txt"
 (cd "$FP_SB" && git add fp.txt && git commit -q -m "feat: fp payload")
 (cd "$REPO" && git merge "$FP_BRANCH" --no-edit >/dev/null 2>&1)
 assert_file_exists "fp work landed in main" "$REPO/fp.txt"
-# Real SessionEnd termination on clean+merged sandbox.
+# Drop TASK.md so scan-uncommitted reports clean (TASK.md is filtered, but
+# any other untracked file would block). Our seeded TASK.md is the only
+# extra, and it's filtered out already — no rm needed. Real SessionEnd
+# termination on clean+merged sandbox:
 FP_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$FP_SESSION")
 printf '%s' "$FP_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
-# Fast-path should have removed the marker so next lifecycle can reap.
+# Fast-path should have removed the marker...
 assert_file_absent "fast-path dropped own marker" "$FP_MARKER"
-# Worktree still on disk at this point — session-end.sh does NOT self-remove
-# (CWD might still be inside). But TASK.md was left behind as untracked.
-rm -f "$FP_SB/TASK.md"
-bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
-assert_dir_absent "next lifecycle reaps after fast-path" "$FP_SB"
+# ...and lifecycle (invoked right after in the same hook) should have
+# removed the worktree itself — no second lifecycle pass required.
+assert_dir_absent "fast-path self-reaped worktree in the same hook" "$FP_SB"
 
-echo "== SessionEnd fast-path: empty session (no commits) drops its own marker =="
+echo "== SessionEnd fast-path: empty session (no commits) self-reaps its worktree =="
 # Regression: user-reported bug. Open session, do nothing, close. The branch
 # tip equals main tip (trivially an ancestor) and the only on-disk delta is
-# the seeded TASK.md (filtered by scan-uncommitted). Fast-path must fire so
-# the next SessionStart's lifecycle reaps the empty worktree — otherwise
-# empty sandboxes accumulate and survive until the 3600s TTL expires.
+# the seeded TASK.md (filtered by scan-uncommitted). Fast-path must fire
+# AND lifecycle must immediately reap the worktree — the user's
+# expectation is that closing the host tool leaves no empty sandbox
+# behind, not that the sandbox lingers until the next SessionStart.
 EMPTY_SESSION="t09-empty"
 EMPTY_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$EMPTY_SESSION")
 printf '%s' "$EMPTY_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
@@ -186,11 +189,10 @@ assert_eq "branch tip equals main tip" "$MAIN_TIP" "$EMPTY_TIP"
 # User closes the session without doing anything.
 EMPTY_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$EMPTY_SESSION")
 printf '%s' "$EMPTY_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
-# Fast-path must have released the marker.
+# Fast-path must have released the marker...
 assert_file_absent "empty-session fast-path dropped marker" "$EMPTY_MARKER"
-# Next lifecycle pass reaps the empty worktree (TASK.md is filtered by scan).
-bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
-assert_dir_absent "next lifecycle reaps empty sandbox" "$EMPTY_SB"
+# ...and lifecycle in the same hook must have removed the worktree.
+assert_dir_absent "empty sandbox self-reaped in the same hook" "$EMPTY_SB"
 
 echo "== SessionEnd fast-path: unmerged branch keeps marker (safety-net) =="
 # Same setup but do NOT merge the branch. Fast-path must NOT fire.

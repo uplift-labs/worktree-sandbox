@@ -30,6 +30,8 @@ HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTER_DIR="$(cd "$HOOK_DIR/.." && pwd)"
 ROOT="$(cd "$ADAPTER_DIR/../.." && pwd)"
 . "$ADAPTER_DIR/lib/json-field.sh"
+. "$ROOT/core/lib/git-context.sh"
+. "$ROOT/core/lib/scan-uncommitted.sh"
 
 INPUT=$(cat)
 SESSION=$(json_field "session_id" "$INPUT")
@@ -94,15 +96,37 @@ if [ "$_can_commit" = 1 ]; then
   fi
 fi
 
-# --- Phase 2: lifecycle reap of merged+clean sandboxes -------------------
+# --- Phase 2: fast-path self-release for the current session -------------
 #
-# Refresh this session's marker mtime BEFORE invoking lifecycle. Lifecycle's
-# default TTL is 3600s while sandbox-init's fresh-window is 86400s; a fresh
-# touch closes the mismatch window so lifecycle cannot prune the marker of
-# the very session we just committed to. Phase 3 of lifecycle then protects
-# this branch (live marker → skip), so even if it were somehow an ancestor
-# of main, it would not be reaped.
-touch "$MARKER" 2>/dev/null
+# If our own branch is already merged into main AND the worktree is clean
+# (scan-uncommitted excludes TASK.md) AND there is no in-progress
+# merge/rebase/detached-HEAD state (_can_commit=1), drop our marker NOW
+# so the lifecycle pass below treats our worktree as unprotected and
+# reaps it in the same invocation — otherwise the empty/merged sandbox
+# lingers on disk until the next SessionStart.
+#
+# The _can_commit gate protects against a rare-but-catastrophic case: a
+# branch already merged into main via a different clone while the sandbox
+# has a stuck rebase/merge. Without the gate we could reap a worktree
+# mid-conflict-resolution.
+#
+# Any uncertainty (detached HEAD, missing main, dirty tree, unmerged
+# branch, in-progress merge/rebase) falls through: the marker stays, and
+# lifecycle's live-marker protection skips our branch so the TTL
+# safety-net handles cleanup later.
+_main=$(sb_main_branch "$REPO" 2>/dev/null || true)
+if [ "$_can_commit" = 1 ] \
+   && [ -n "$_main" ] \
+   && git -C "$SB" merge-base --is-ancestor "$BRANCH" "$_main" 2>/dev/null \
+   && sb_scan_uncommitted "$SB" >/dev/null 2>&1; then
+  rm -f "$MARKER" 2>/dev/null || true
+fi
 
+# --- Phase 3: lifecycle reap of merged+clean sandboxes -------------------
+#
+# Runs after the fast-path so that, when our marker has just been dropped,
+# Phase 3 of lifecycle actually removes our own worktree in this pass.
+# For sessions that kept their marker, lifecycle's live-marker protection
+# skips our branch as before.
 bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || true
 exit 0
