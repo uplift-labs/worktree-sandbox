@@ -1,16 +1,27 @@
 #!/bin/bash
 # session-end.sh — Claude Code SessionEnd hook wrapper.
 # Fires on real session termination (/exit, Ctrl+D/C, SIGHUP, logout, idle).
-# Responsible for graduating the sandbox branch: merge-gate → merge → cleanup.
+#
+# Responsibility: durability, not graduation.
+#   1. Capture-commit any pending work in the current sandbox so nothing is
+#      lost when the process exits. TASK.md is excluded from the commit
+#      (scratchpad, must not pollute main on any future manual merge).
+#   2. Invoke sandbox-lifecycle to reap *other* sandboxes whose branches
+#      have already been merged into main and whose worktrees are clean.
+#
+# This hook does NOT merge the current session's branch into main. Merging
+# is always a deliberate user action (`git merge <branch>` or the
+# pre-merge-commit hook). Auto-merging on exit is too aggressive — the user
+# may want to review, rebase, or discard.
 #
 # SessionEnd CANNOT block termination, so this script must be fast and
-# idempotent. If gate fails or merge conflicts, the sandbox is left alive
-# so the TTL safety-net in sandbox-lifecycle.sh can reclaim it later.
+# idempotent. Any failure leaves the sandbox alive for the TTL safety-net
+# in sandbox-lifecycle.sh (next SessionStart) to reclaim later.
 #
 # Reason branching:
-#   clear   — /clear, context reset; session continues. No-op except heartbeat.
-#   compact — compact restart; session continues. No-op except heartbeat.
-#   other   — real termination (prompt_input_exit, logout, other, ...). Graduate.
+#   clear   — /clear, context reset; session continues. Heartbeat only.
+#   compact — compact restart; session continues. Heartbeat only.
+#   other   — real termination. Capture-commit + lifecycle.
 
 set -u
 [ "${CI:-}" = "true" ] && exit 0
@@ -34,8 +45,7 @@ BRANCH=$(awk '{print $1}' "$MARKER")
 SB="$REPO/.sandbox/worktrees/$BRANCH"
 
 # Non-terminating reasons: session is not actually ending — just heartbeat
-# the marker and bail. SessionStart will re-inject the banner on the next
-# turn / compact-restart.
+# the marker and bail. No commit, no scan.
 case "$REASON" in
   clear|compact)
     touch "$MARKER" 2>/dev/null
@@ -43,31 +53,56 @@ case "$REASON" in
     ;;
 esac
 
-# Real termination path — graduate the sandbox.
-[ -d "$SB" ] || { rm -f "$MARKER" 2>/dev/null; exit 0; }
+# Real termination path.
+[ -d "$SB" ] || exit 0
 
-# Gate check: if unmergeable (unchecked TASK.md, dirty tree, untracked),
-# leave everything alive. Next SessionStart resume will pick it up; if the
-# session never resumes, lifecycle's TTL reclaim will eventually handle it.
-if ! reason_msg=$(bash "$ROOT/core/cmd/sandbox-merge-gate.sh" --worktree "$SB" 2>&1); then
-  printf '[sandbox] SessionEnd: gate failed, leaving sandbox alive: %s\n' "$reason_msg" >&2
-  exit 0
+# --- Phase 1: capture-commit pending work in the current sandbox ---------
+#
+# Guard against in-progress states where `git commit` would do something
+# unexpected. Skip the commit phase in any of them; lifecycle still runs.
+_can_commit=1
+# Use git rev-parse --git-path so this works for linked worktrees (where
+# .git is a file pointing into the main repo's worktrees/<name> dir, and
+# MERGE_HEAD etc. live in that pointed-to dir, not in $SB/.git/).
+_merge_head=$(git -C "$SB" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)
+_rebase_head=$(git -C "$SB" rev-parse --git-path REBASE_HEAD 2>/dev/null || true)
+_rebase_apply=$(git -C "$SB" rev-parse --git-path rebase-apply 2>/dev/null || true)
+_rebase_merge=$(git -C "$SB" rev-parse --git-path rebase-merge 2>/dev/null || true)
+if { [ -n "$_merge_head" ] && [ -f "$_merge_head" ]; } \
+   || { [ -n "$_rebase_head" ] && [ -f "$_rebase_head" ]; } \
+   || { [ -n "$_rebase_apply" ] && [ -d "$_rebase_apply" ]; } \
+   || { [ -n "$_rebase_merge" ] && [ -d "$_rebase_merge" ]; }; then
+  _can_commit=0
+  printf '[sandbox] SessionEnd: in-progress merge/rebase in %s — skipping capture-commit.\n' "$BRANCH" >&2
+fi
+if [ "$_can_commit" = 1 ] && ! git -C "$SB" symbolic-ref -q HEAD >/dev/null 2>&1; then
+  _can_commit=0
+  printf '[sandbox] SessionEnd: detached HEAD in %s — skipping capture-commit.\n' "$BRANCH" >&2
 fi
 
-# Gate passed — remove TASK.md so the template does not pollute main.
-rm -f "$SB/TASK.md" 2>/dev/null
+if [ "$_can_commit" = 1 ]; then
+  # Stage everything, then unstage TASK.md. TASK.md is a per-session
+  # scratchpad and must never enter the branch history.
+  git -C "$SB" add -A >/dev/null 2>&1 || true
+  git -C "$SB" reset -q -- TASK.md >/dev/null 2>&1 || true
 
-# Merge the branch into main, unless already an ancestor.
-if ! git -C "$REPO" merge-base --is-ancestor "$BRANCH" main 2>/dev/null; then
-  if ! git -C "$REPO" merge "$BRANCH" --no-edit >/dev/null 2>&1; then
-    git -C "$REPO" merge --abort >/dev/null 2>&1 || true
-    printf '[sandbox] SessionEnd: merge conflict on %s — resolve manually.\n' "$BRANCH" >&2
-    exit 0
+  # Commit iff something is actually staged after the TASK.md unstage.
+  if ! git -C "$SB" diff --cached --quiet >/dev/null 2>&1; then
+    if ! git -C "$SB" commit -q -m "chore(session-end): capture pending work on exit" >/dev/null 2>&1; then
+      printf '[sandbox] SessionEnd: capture-commit failed on %s — sandbox left as-is.\n' "$BRANCH" >&2
+    fi
   fi
 fi
 
-# Merge succeeded — drop the marker and let lifecycle reap the worktree,
-# branch, and any residual dir.
-rm -f "$MARKER" 2>/dev/null
+# --- Phase 2: lifecycle reap of merged+clean sandboxes -------------------
+#
+# Refresh this session's marker mtime BEFORE invoking lifecycle. Lifecycle's
+# default TTL is 3600s while sandbox-init's fresh-window is 86400s; a fresh
+# touch closes the mismatch window so lifecycle cannot prune the marker of
+# the very session we just committed to. Phase 3 of lifecycle then protects
+# this branch (live marker → skip), so even if it were somehow an ancestor
+# of main, it would not be reaped.
+touch "$MARKER" 2>/dev/null
+
 bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || true
 exit 0

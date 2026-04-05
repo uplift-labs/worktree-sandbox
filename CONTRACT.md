@@ -95,11 +95,26 @@ load-bearing — don't collapse them:
 | `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox. |
 | `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
 | `Stop`         | `stop.sh`           | **Per-turn read-only gate + marker heartbeat.** Never merges, never cleans. Emits `{"decision":"block",...}` if the worktree is unmergeable so the agent gets a chance to fix it on the next turn. |
-| `SessionEnd`   | `session-end.sh`    | **Graduation point.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...) runs the merge gate, merges the branch into main, drops the marker, and invokes `sandbox-lifecycle`. On `clear` / `compact` reasons it only heartbeats the marker — the session is continuing. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net to reclaim. |
+| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (1) capture-commit any pending tracked mods + untracked files in the current sandbox (excluding `TASK.md`) so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
 
 **Why the split:** Claude Code's `Stop` hook fires after every agent turn,
-not at session end. Merging on `Stop` would destroy a live sandbox mid
-conversation the first time `TASK.md` is fully checked.
+not at session end. Any merge or cleanup in `Stop` would destroy a live
+sandbox mid-conversation the first time `TASK.md` is fully checked.
+
+**Why SessionEnd does not merge:** auto-merging on exit is too aggressive —
+the user may want to review the diff, rebase, or discard. SessionEnd's only
+active job is durability: capture uncommitted work into the branch so
+nothing is lost if the process dies. Merging into `main` is always a
+deliberate user action (`git merge <branch>` or the `pre-merge-commit`
+hook). Once the user has merged, the NEXT `SessionEnd` (of any session)
+will reap the resulting ancestor-clean branch + worktree via lifecycle.
+
+**Squash / rebase caveat:** lifecycle's "merged" check uses
+`git merge-base --is-ancestor`. Branches squash-merged or rebase-merged
+are not ancestors of `main` and will not be auto-reaped — the user must
+delete such branches manually or rely on the orphan-branch sweep if the
+branch name matches the sandbox prefix and the original commits are in
+`main`.
 
 ## Library functions
 

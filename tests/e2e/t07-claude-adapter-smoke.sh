@@ -80,13 +80,34 @@ assert_dir_exists "sandbox preserved on clear" "$SB_PATH"
 assert_file_exists "marker preserved on clear" "$REPO/.git/sandbox-markers/$SESSION"
 assert_file_absent "main untouched on clear" "$REPO/work.txt"
 
-echo "== session-end: reason=prompt_input_exit graduates the sandbox =="
+echo "== session-end: reason=prompt_input_exit captures pending work WITHOUT merging =="
+# Add an uncommitted file so SessionEnd has something to capture-commit.
+echo "pending" > "$SB_PATH/pending.txt"
 EXIT_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$SESSION")
 OUT=$(printf '%s' "$EXIT_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-end.sh" 2>&1)
 ec=$?
 assert_exit "session-end exit exits 0" 0 "$ec"
-assert_file_exists "work merged into main" "$REPO/work.txt"
-assert_dir_absent "sandbox cleaned up" "$SB_PATH"
-assert_file_absent "marker cleaned up" "$REPO/.git/sandbox-markers/$SESSION"
+# Durability: pending work is committed on the sandbox branch.
+assert_file_exists "pending captured inside sandbox" "$SB_PATH/pending.txt"
+BRANCH=$(awk '{print $1}' "$REPO/.git/sandbox-markers/$SESSION")
+LAST_SUBJ=$(git -C "$SB_PATH" log -1 --format=%s "$BRANCH")
+assert_contains "capture-commit subject" "capture pending work" "$LAST_SUBJ"
+# No merge: main must still NOT have the files from the sandbox branch.
+assert_file_absent "main still lacks work.txt" "$REPO/work.txt"
+assert_file_absent "main still lacks pending.txt" "$REPO/pending.txt"
+# Sandbox stays alive for the user to review + merge manually.
+assert_dir_exists "sandbox preserved after SessionEnd" "$SB_PATH"
+assert_file_exists "marker preserved after SessionEnd" "$REPO/.git/sandbox-markers/$SESSION"
+
+echo "== after manual merge + lifecycle pass, the now-merged sandbox is reaped =="
+# User merges manually.
+(cd "$REPO" && git merge "$BRANCH" --no-edit >/dev/null 2>&1)
+assert_file_exists "work landed in main after manual merge" "$REPO/work.txt"
+# Remove this session's marker to simulate "session is gone" (in reality a
+# second SessionEnd or a TTL-prune from a parallel session would do this).
+rm -f "$REPO/.git/sandbox-markers/$SESSION"
+# Now lifecycle Phase 3 has nothing protecting the merged+clean branch.
+bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1
+assert_dir_absent "merged sandbox reaped by lifecycle" "$SB_PATH"
 
 test_summary

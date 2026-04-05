@@ -144,34 +144,51 @@ This is the load-bearing change vs earlier versions. `Stop` firing per turn
 means any graduation logic here will destroy a live sandbox the first time
 `TASK.md` happens to be fully checked.
 
-### Phase C — Graduation (SessionEnd)
+### Phase C — Durability + housekeeping (SessionEnd)
 
 `adapters/claude-code/hooks/session-end.sh` runs on real terminations
 (`/exit`, Ctrl+D/C, SIGHUP on terminal close, logout, idle timeout). Branch
 on the `reason` field from stdin JSON:
 
-| `reason`                          | Action                                   | Rationale                                       |
-|-----------------------------------|------------------------------------------|-------------------------------------------------|
-| `clear`                           | heartbeat marker only                    | `/clear` resets context; session continues      |
-| `compact`                         | heartbeat marker only                    | Symmetric to SessionStart compact handling      |
-| `prompt_input_exit`, `logout`, `other`, ... | full graduate (see below)       | Real termination                                |
+| `reason`                                    | Action                               | Rationale                                    |
+|---------------------------------------------|--------------------------------------|----------------------------------------------|
+| `clear`                                     | heartbeat marker only                | `/clear` resets context; session continues   |
+| `compact`                                   | heartbeat marker only                | Symmetric to SessionStart compact handling   |
+| `prompt_input_exit`, `logout`, `other`, ... | capture-commit + lifecycle (below)   | Real termination                             |
 
-Full graduate steps:
+**SessionEnd does not merge into main.** Auto-merging on exit is too
+aggressive — the user may want to review the diff, rebase, or discard.
+Merging is always a deliberate user action (`git merge <branch>` or the
+installed `pre-merge-commit` hook).
 
-1. Run `sandbox-merge-gate`. If it fails: **log and leave everything alive**.
-   SessionEnd cannot block exit, so the only safe move is to let the TTL
-   safety-net reclaim it later (or a resume session pick it up). Do not
-   remove the marker.
-2. Delete the sandbox's `TASK.md` so the template does not pollute main.
-3. `git merge <branch>` into main (skipped if already ancestor). On conflict:
-   `merge --abort`, leave the branch + marker alive, log the conflict.
-4. Remove the marker and invoke `sandbox-lifecycle` — it reaps the (now
-   merged + clean) worktree, deletes the branch, and sweeps any residual
-   directory.
+Steps on real termination:
 
-Invariant after a successful graduate: no marker, no branch, no worktree
-directory. Commits are in main. The CWD becomes a "ghost" (physically gone),
-which is fine because the session is already terminating.
+1. Guard against in-progress states (`MERGE_HEAD`, rebase dirs, detached
+   HEAD) — skip the commit phase if any apply, logging to stderr.
+2. Stage everything in the sandbox (`git add -A`), then unstage `TASK.md`
+   so the per-session scratchpad never enters the branch history.
+3. If anything is still staged, commit with
+   `chore(session-end): capture pending work on exit`. Project pre-commit
+   hooks run normally; failures are logged and the sandbox is left as-is.
+4. Refresh this session's marker mtime (closes the TTL-mismatch window
+   against lifecycle's 1h prune vs sandbox-init's 24h fresh window).
+5. Invoke `sandbox-lifecycle.sh --repo <REPO>`. Lifecycle reaps *other*
+   sandboxes whose branches are ancestors of `main` and whose worktrees
+   are clean — the current session's branch is protected because its
+   marker is live.
+
+**Invariant after SessionEnd:** the current session's sandbox is still on
+disk, its branch has all work committed, main is untouched. Any
+previously-merged sandboxes from this or other sessions have been reaped.
+The user merges when ready; the *next* SessionEnd (of any session) will
+then reap the now-merged branch + worktree.
+
+**Squash / rebase caveat:** the "merged" check uses
+`git merge-base --is-ancestor`. Branches squash-merged or rebase-merged
+into main are not ancestors and will not be auto-reaped. Either delete
+them manually, or rely on the orphan-branch sweep (Phase 4 of lifecycle)
+which matches branches by the `sandbox-session-*` prefix when they are
+ancestors of main and no worktree references them.
 
 ### Phase D — Compact restart
 
@@ -203,15 +220,17 @@ of every normal session:
 5. **Residual dir sweep**: remove empty `.sandbox/worktrees/*` directories
    that have no `.git` marker and no unhidden files.
 
-Behaviour under different crash scenarios:
+Behaviour under different scenarios:
 
-| State after crash                               | Marker pruned?      | Branch removed?                  | Worktree removed?             | Where work goes                                              |
-|-------------------------------------------------|---------------------|----------------------------------|-------------------------------|--------------------------------------------------------------|
-| Clean close, SessionEnd never fired             | Yes (via TTL)       | Phase 4, only if ancestor of main| Phase 3, only if merged+clean | Stays as unmerged feature branch if work never merged        |
-| Live session, heartbeat still fresh             | No                  | No                               | No                            | Keeps running                                                |
-| Crash mid-work with uncommitted changes         | Yes via TTL         | No (unmerged)                    | No (dirty)                    | **Entirely preserved** — user can recover manually           |
-| SessionEnd gate failed                          | No (we kept it)     | No                               | No                            | Lives until manual resolution or the TTL eventually trips    |
-| Ghost empty directory after successful graduate | —                   | —                                | Phase 5                       | Nothing to lose                                              |
+| State                                              | Marker pruned?  | Branch removed?                      | Worktree removed?             | Where work goes                                                            |
+|----------------------------------------------------|-----------------|--------------------------------------|-------------------------------|----------------------------------------------------------------------------|
+| Live session, heartbeat still fresh                | No              | No                                   | No                            | Keeps running                                                              |
+| Clean SessionEnd, user has NOT merged yet          | No (fresh)      | No (unmerged)                        | No                            | Captured to branch, waits for user `git merge`                             |
+| Clean SessionEnd, branch was already merged        | No (fresh)      | Protected by live marker this round  | Same                          | Reaped on the NEXT SessionEnd (of any session) once marker goes stale      |
+| User runs `git merge` after SessionEnd             | Next TTL prune  | Yes (Phase 3/4) on next lifecycle    | Yes (Phase 3/5)               | In main; branch + worktree reaped next lifecycle pass                      |
+| Crash mid-work, uncommitted changes never captured | Yes via TTL     | No (unmerged)                        | No (dirty)                    | **Entirely preserved** in the worktree — user can recover manually         |
+| SessionEnd capture-commit failed (hook error)      | No (still fresh)| No                                   | No                            | Worktree stays dirty; user resolves on resume                              |
+| Ghost empty directory from earlier reap            | —               | —                                    | Phase 5                       | Nothing to lose                                                            |
 
 ### TTL mismatch note
 
@@ -222,10 +241,10 @@ prune its marker. The branch and worktree survive (unmerged/dirty is
 preserved), but the marker→worktree link is lost; a subsequent SessionStart
 for the same `session_id` will create a **new** sandbox, and the orphan can
 only be recovered manually. In practice this window is closed by the
-per-turn heartbeat in Phase B — the only vulnerable case is "open client,
-walk away for hours without sending a message". If you need to close the
-window completely, pass `--ttl 86400` from `session-start.sh` to align both
-TTLs.
+per-turn heartbeat in Phase B and by the pre-lifecycle `touch` in Phase C —
+the only vulnerable case is "open client, walk away for hours without
+sending a message". If you need to close the window completely, pass
+`--ttl 86400` from `session-start.sh` / `session-end.sh` to align both TTLs.
 
 ## Testing
 

@@ -1,9 +1,16 @@
 #!/bin/bash
-# t09 — SessionEnd graduation hook.
-# Covers the Stop/SessionEnd split (plan: virtual-finding-hopcroft):
+# t09 — SessionEnd durability + housekeeping (commit-only, no auto-merge).
+# Covers:
 #   - Multiple Stop turns with a fully-checked TASK.md keep the sandbox alive.
-#   - SessionEnd with a failing gate leaves the sandbox alive (can't block exit).
-#   - SessionEnd with reason=other completes the graduate.
+#   - SessionEnd reason=clear / compact are heartbeat-only.
+#   - SessionEnd reason=prompt_input_exit captures pending work as a commit
+#     on the sandbox branch, WITHOUT merging into main.
+#   - SessionEnd skips commit when the tree is already clean.
+#   - TASK.md is excluded from the capture-commit.
+#   - In-progress merge state blocks the capture-commit (graceful skip).
+#   - After a manual merge, lifecycle reaps the now merged+clean sandbox
+#     (Phase 3) on its next pass (guarded by live-marker protection, so the
+#     marker must be absent / stale first).
 set -u
 SELF="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SELF/../.." && pwd)"
@@ -17,12 +24,14 @@ REPO=$(fixture_repo "t09")
 SESSION="t09-graduation"
 STOP_HOOK="$ROOT/adapters/claude-code/hooks/stop.sh"
 END_HOOK="$ROOT/adapters/claude-code/hooks/session-end.sh"
+LIFECYCLE="$ROOT/core/cmd/sandbox-lifecycle.sh"
 
 # Bootstrap: start a session.
 START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$SESSION")
 printf '%s' "$START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
 SB_PATH="$REPO/.sandbox/worktrees/sandbox-session-$SESSION"
 MARKER="$REPO/.git/sandbox-markers/$SESSION"
+BRANCH="sandbox-session-$SESSION"
 assert_dir_exists "sandbox created" "$SB_PATH"
 
 echo "== multi-turn: Stop with passing gate keeps sandbox alive across turns =="
@@ -49,33 +58,82 @@ for turn in 1 2 3; do
   assert_file_absent "main untouched after turn $turn" "$REPO/feature.txt"
 done
 
-echo "== SessionEnd: gate failure leaves sandbox alive =="
-# Introduce an untracked file — gate blocks on ??.
-echo "scratch" > "$SB_PATH/scratch.tmp"
-END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$SESSION")
-OUT=$(printf '%s' "$END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" 2>&1)
-ec=$?
-assert_exit "SessionEnd exits 0 on gate fail" 0 "$ec"
-assert_dir_exists "sandbox preserved when gate fails" "$SB_PATH"
-assert_file_exists "marker preserved when gate fails" "$MARKER"
-assert_file_absent "main untouched when gate fails" "$REPO/feature.txt"
-
-echo "== SessionEnd reason=clear is no-op even with passing gate =="
-rm -f "$SB_PATH/scratch.tmp"
+echo "== SessionEnd reason=clear is heartbeat-only =="
 CLEAR_IN=$(printf '{"session_id":"%s","reason":"clear"}' "$SESSION")
-OUT=$(printf '%s' "$CLEAR_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" 2>&1)
-ec=$?
-assert_exit "SessionEnd clear exits 0" 0 "$ec"
+TIP_BEFORE=$(git -C "$SB_PATH" rev-parse HEAD)
+printf '%s' "$CLEAR_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+assert_eq "no commit created on clear" "$TIP_BEFORE" "$(git -C "$SB_PATH" rev-parse HEAD)"
 assert_dir_exists "sandbox preserved on clear" "$SB_PATH"
-assert_file_exists "marker preserved on clear" "$MARKER"
 assert_file_absent "main untouched on clear" "$REPO/feature.txt"
 
-echo "== SessionEnd reason=prompt_input_exit graduates cleanly =="
+echo "== SessionEnd reason=compact is heartbeat-only =="
+COMPACT_IN=$(printf '{"session_id":"%s","reason":"compact"}' "$SESSION")
+printf '%s' "$COMPACT_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+assert_eq "no commit created on compact" "$TIP_BEFORE" "$(git -C "$SB_PATH" rev-parse HEAD)"
+assert_dir_exists "sandbox preserved on compact" "$SB_PATH"
+
+echo "== SessionEnd real termination: clean tree → no commit, no merge, sandbox alive =="
+END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$SESSION")
+printf '%s' "$END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+assert_eq "clean tree → no new commit" "$TIP_BEFORE" "$(git -C "$SB_PATH" rev-parse HEAD)"
+assert_dir_exists "sandbox alive after clean SessionEnd" "$SB_PATH"
+assert_file_exists "marker alive after clean SessionEnd" "$MARKER"
+assert_file_absent "main still untouched" "$REPO/feature.txt"
+
+echo "== SessionEnd real termination: pending work is captured as commit, main untouched =="
+echo "new work" > "$SB_PATH/new.txt"
+echo "modify" >> "$SB_PATH/feature.txt"
+# Modify TASK.md too — must be EXCLUDED from the commit.
+echo "- [x] Extra note" >> "$SB_PATH/TASK.md"
+printf '%s' "$END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+TIP_AFTER=$(git -C "$SB_PATH" rev-parse HEAD)
+assert_contains "new commit created" "$TIP_AFTER" "$(git -C "$SB_PATH" rev-parse HEAD)"
+# Capture-commit subject.
+LAST_SUBJ=$(git -C "$SB_PATH" log -1 --format=%s)
+assert_contains "commit subject mentions capture" "capture pending work" "$LAST_SUBJ"
+# Commit contains new.txt and feature.txt, but NOT TASK.md.
+CHANGED=$(git -C "$SB_PATH" show --name-only --format='' HEAD)
+assert_contains "new.txt in capture commit" "new.txt" "$CHANGED"
+assert_contains "feature.txt in capture commit" "feature.txt" "$CHANGED"
+assert_not_contains "TASK.md NOT in capture commit" "TASK.md" "$CHANGED"
+# TASK.md should still be a local modification in the worktree.
+TASK_STATUS=$(git -C "$SB_PATH" status --porcelain TASK.md)
+assert_contains "TASK.md still dirty in worktree" "TASK.md" "$TASK_STATUS"
+# Main branch is still untouched — the whole point of the refactor.
+assert_file_absent "main never got feature.txt" "$REPO/feature.txt"
+assert_file_absent "main never got new.txt" "$REPO/new.txt"
+# Sandbox is alive.
+assert_dir_exists "sandbox alive after capture SessionEnd" "$SB_PATH"
+assert_file_exists "marker alive after capture SessionEnd" "$MARKER"
+
+echo "== in-progress merge blocks capture-commit gracefully =="
+# Set up a second branch to merge into the sandbox branch, producing conflict.
+(cd "$SB_PATH" && git checkout -q -b conflict-branch "$BRANCH"^)
+echo "conflict-a" > "$SB_PATH/feature.txt"
+(cd "$SB_PATH" && git add feature.txt && git commit -q -m "conflicting change")
+(cd "$SB_PATH" && git checkout -q "$BRANCH")
+# Intentionally start a merge that will conflict, leaving MERGE_HEAD.
+git -C "$SB_PATH" merge --no-commit conflict-branch >/dev/null 2>&1 || true
+MERGE_HEAD_PATH=$(git -C "$SB_PATH" rev-parse --git-path MERGE_HEAD)
+assert_file_exists "MERGE_HEAD exists" "$MERGE_HEAD_PATH"
+TIP_MERGE_BEFORE=$(git -C "$SB_PATH" rev-parse HEAD)
 OUT=$(printf '%s' "$END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" 2>&1)
 ec=$?
-assert_exit "SessionEnd graduate exits 0" 0 "$ec"
-assert_file_exists "work reached main" "$REPO/feature.txt"
-assert_dir_absent "sandbox reaped" "$SB_PATH"
-assert_file_absent "marker reaped" "$MARKER"
+assert_exit "SessionEnd exits 0 on in-progress merge" 0 "$ec"
+assert_eq "HEAD unchanged — no commit attempted" "$TIP_MERGE_BEFORE" "$(git -C "$SB_PATH" rev-parse HEAD)"
+assert_dir_exists "sandbox still alive" "$SB_PATH"
+# Clean up the merge state for the next phase.
+git -C "$SB_PATH" merge --abort >/dev/null 2>&1 || true
+
+echo "== manual merge + lifecycle reaps the merged+clean sandbox =="
+# User merges the branch manually.
+(cd "$REPO" && git merge "$BRANCH" --no-edit >/dev/null 2>&1)
+assert_file_exists "work landed in main after manual merge" "$REPO/feature.txt"
+# Remove TASK.md from the worktree so it counts as clean for Phase 3.
+rm -f "$SB_PATH/TASK.md"
+# Drop the marker so lifecycle's live-marker protection does not skip.
+rm -f "$MARKER"
+bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
+assert_dir_absent "merged sandbox reaped by lifecycle" "$SB_PATH"
 
 test_summary
