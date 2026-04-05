@@ -1,0 +1,4 @@
+# Disabled checks:
+# SC1090/SC1091 - dynamic source paths are intentional (install-time relocation)
+# SC2034 - some vars are documented via naming only
+disable=SC1090,SC1091,SC2034

@@ -1,0 +1,15 @@
+# Test scratch
+/tmp/
+tests/tmp/
+*.tmp
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Build / install
+/build/
+/dist/

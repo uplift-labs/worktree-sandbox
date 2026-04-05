@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck (ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install shellcheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          shopt -s globstar nullglob
+          set -e
+          for f in core/**/*.sh adapters/**/*.sh tests/**/*.sh install.sh; do
+            [ -f "$f" ] || continue
+            shellcheck "$f"
+          done
+
+      - name: Run test suite
+        run: bash tests/run.sh
