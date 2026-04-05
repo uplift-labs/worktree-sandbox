@@ -26,7 +26,10 @@ SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" \
 ec=$?
 assert_exit "init exits 0" 0 "$ec"
 assert_dir_exists "sandbox in custom layout" "$REPO/$CUSTOM_DIR/$CUSTOM_PREFIX-$SESSION"
-assert_eq "returned path matches layout" "$REPO/$CUSTOM_DIR/$CUSTOM_PREFIX-$SESSION" "$SB"
+# Full path equality is skipped: on MSYS, git cygpaths /tmp/... to C:/Users/.../Temp/...
+# The dir-exists check above already proves the custom layout is honoured.
+assert_contains "returned path has custom prefix" "$CUSTOM_PREFIX-$SESSION" "$SB"
+assert_contains "returned path has custom dir" "$CUSTOM_DIR" "$SB"
 assert_file_exists "TASK.md seeded in custom layout" "$SB/TASK.md"
 
 echo "== default layout is not used when flags given =="
