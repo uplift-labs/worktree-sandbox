@@ -136,4 +136,48 @@ rm -f "$MARKER"
 bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
 assert_dir_absent "merged sandbox reaped by lifecycle" "$SB_PATH"
 
+echo "== SessionEnd fast-path: merged+clean branch drops own marker so next lifecycle reaps =="
+# Fresh session. The fast-path in session-end.sh should release the marker
+# if (a) branch is an ancestor of main and (b) scan-uncommitted is clean
+# and (c) no in-progress merge/rebase. Without this, the sandbox would
+# linger until the 3600s TTL expires.
+FP_SESSION="t09-fp1"
+FP_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$FP_SESSION")
+printf '%s' "$FP_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
+FP_SB="$REPO/.sandbox/worktrees/sandbox-session-$FP_SESSION"
+FP_MARKER="$REPO/.git/sandbox-markers/$FP_SESSION"
+FP_BRANCH="sandbox-session-$FP_SESSION"
+assert_dir_exists "fast-path sandbox created" "$FP_SB"
+assert_file_exists "fast-path marker created" "$FP_MARKER"
+# Real work + merge it into main, so branch becomes an ancestor of main.
+echo "fp-payload" > "$FP_SB/fp.txt"
+(cd "$FP_SB" && git add fp.txt && git commit -q -m "feat: fp payload")
+(cd "$REPO" && git merge "$FP_BRANCH" --no-edit >/dev/null 2>&1)
+assert_file_exists "fp work landed in main" "$REPO/fp.txt"
+# Real SessionEnd termination on clean+merged sandbox.
+FP_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$FP_SESSION")
+printf '%s' "$FP_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+# Fast-path should have removed the marker so next lifecycle can reap.
+assert_file_absent "fast-path dropped own marker" "$FP_MARKER"
+# Worktree still on disk at this point — session-end.sh does NOT self-remove
+# (CWD might still be inside). But TASK.md was left behind as untracked.
+rm -f "$FP_SB/TASK.md"
+bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
+assert_dir_absent "next lifecycle reaps after fast-path" "$FP_SB"
+
+echo "== SessionEnd fast-path: unmerged branch keeps marker (safety-net) =="
+# Same setup but do NOT merge the branch. Fast-path must NOT fire.
+FP2_SESSION="t09-fp2"
+FP2_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$FP2_SESSION")
+printf '%s' "$FP2_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
+FP2_SB="$REPO/.sandbox/worktrees/sandbox-session-$FP2_SESSION"
+FP2_MARKER="$REPO/.git/sandbox-markers/$FP2_SESSION"
+echo "fp2-payload" > "$FP2_SB/fp2.txt"
+(cd "$FP2_SB" && git add fp2.txt && git commit -q -m "feat: fp2 payload")
+# Branch is ahead of main, NOT an ancestor → fast-path skipped.
+FP2_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$FP2_SESSION")
+printf '%s' "$FP2_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+assert_file_exists "unmerged fast-path keeps marker" "$FP2_MARKER"
+assert_dir_exists "unmerged fast-path keeps sandbox" "$FP2_SB"
+
 test_summary

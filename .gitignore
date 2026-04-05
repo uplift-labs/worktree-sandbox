@@ -13,3 +13,6 @@ tests/tmp/
 # Build / install
 /build/
 /dist/
+
+# Sandbox runtime state (per-session worktrees, not part of repo history)
+/.sandbox/worktrees/
