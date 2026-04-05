@@ -1,0 +1,9 @@
+{
+  "updated_at": "2026-04-05T19:42:58Z",
+  "session_id": "15b063b8-d464-40c9-9c1b-3ffb71bc20cc",
+  "files_modified": ["core/cmd/sandbox-init.sh","core/cmd/sandbox-lifecycle.sh","core/lib/task-md.sh","docs/metrics/guard-stats.dat"],
+  "files_created": [".agent/session-state.json"],
+  "uncommitted_changes": 7,
+  "last_action": "Write t08-custom-layout-flags.sh",
+  "progress_notes": "Session ended normally. "
+}

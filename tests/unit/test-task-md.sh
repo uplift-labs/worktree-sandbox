@@ -79,4 +79,20 @@ assert_contains "has purpose" "Done" "$got"
 assert_contains "has tasks" "0/2" "$got"
 assert_contains "has created" "2026-04-05" "$got"
 
+
+echo "== sb_task_seed_placeholder creates template on empty dir =="
+SEED_DIR="$FIXTURE_ROOT/seed"
+mkdir -p "$SEED_DIR"
+sb_task_seed_placeholder "$SEED_DIR"
+assert_file_exists "TASK.md seeded" "$SEED_DIR/TASK.md"
+content=$(cat "$SEED_DIR/TASK.md")
+assert_contains "has purpose line" "purpose: TODO" "$content"
+assert_contains "has checkbox" "^- \[ \] TODO" "$content"
+assert_contains "has tasks section" "## Tasks" "$content"
+
+echo "== sb_task_seed_placeholder is idempotent =="
+printf 'keep me' > "$SEED_DIR/TASK.md"
+sb_task_seed_placeholder "$SEED_DIR"
+assert_eq "existing TASK.md preserved" "keep me" "$(cat "$SEED_DIR/TASK.md")"
+
 test_summary

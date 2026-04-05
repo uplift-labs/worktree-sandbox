@@ -95,3 +95,28 @@ sb_task_context() {
   printf 'purpose: %s | tasks: %s/%s unchecked' "${purpose:-unknown}" "$uc" "$tc"
   [ -n "$created" ] && printf ' | created: %s' "$created"
 }
+# Seed a placeholder TASK.md at <wt-dir>/TASK.md if one does not already exist.
+# The template intentionally contains TODO markers so that sb_task_is_placeholder
+# returns 0 until a human replaces them.
+sb_task_seed_placeholder() {
+  local wt="$1"
+  local file="$wt/TASK.md"
+  [ -f "$file" ] && return 0
+  local today
+  today=$(date '+%Y-%m-%d' 2>/dev/null || printf 'undated')
+  {
+    printf -- '---
+'
+    printf 'created: %s
+' "$today"
+    printf 'purpose: TODO — replace with a one-line goal for this sandbox
+'
+    printf -- '---
+
+## Tasks
+
+'
+    printf -- '- [ ] TODO — replace with 3-7 concrete deliverables before substantive work
+'
+  } > "$file"
+}

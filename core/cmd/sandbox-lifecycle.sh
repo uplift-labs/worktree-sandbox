@@ -29,12 +29,13 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 
 usage() { printf 'usage: sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]\n' >&2; exit 2; }
 
-REPO=""; TTL=3600; PREFIX="sandbox-session-*"
+REPO=""; TTL=3600; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)          REPO="$2"; shift 2 ;;
     --ttl)           TTL="$2"; shift 2 ;;
     --branch-prefix) PREFIX="$2"; shift 2 ;;
+    --worktrees-dir) WT_DIR="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; usage ;;
   esac
@@ -96,7 +97,7 @@ ORPHAN_OUT=$(sb_wt_sweep_orphan_branches "$GIT_ROOT" "$PREFIX" "$MAIN_BRANCH")
 [ -n "$ORPHAN_OUT" ] && LINES="${LINES}${ORPHAN_OUT}\n"
 
 # Phase 5: residual directory sweep
-SB_WT_DIR="$GIT_ROOT/.sandbox/worktrees"
+SB_WT_DIR="$GIT_ROOT/$WT_DIR"
 if [ -d "$SB_WT_DIR" ]; then
   RESIDUAL=$(sb_wt_sweep_residual_dirs "$SB_WT_DIR")
   [ -n "$RESIDUAL" ] && LINES="${LINES}${RESIDUAL}\n"

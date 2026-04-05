@@ -26,17 +26,22 @@ CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/git-context.sh"
 . "$ROOT/core/lib/ttl-marker.sh"
+. "$ROOT/core/lib/task-md.sh"
 
 MARKER_TTL=86400  # 24h
 
-usage() { printf 'usage: sandbox-init.sh --repo <dir> --session <id> [--base <branch>]\n' >&2; exit 2; }
+usage() { printf 'usage: sandbox-init.sh --repo <dir> --session <id> [--base <branch>] [--worktrees-dir <rel>] [--branch-prefix <prefix>]\n' >&2; exit 2; }
 
 REPO=""; SESSION=""; BASE=""
+WT_DIR=".sandbox/worktrees"
+BR_PREFIX="sandbox-session"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)    REPO="$2"; shift 2 ;;
-    --session) SESSION="$2"; shift 2 ;;
-    --base)    BASE="$2"; shift 2 ;;
+    --repo)           REPO="$2"; shift 2 ;;
+    --session)        SESSION="$2"; shift 2 ;;
+    --base)           BASE="$2"; shift 2 ;;
+    --worktrees-dir)  WT_DIR="$2"; shift 2 ;;
+    --branch-prefix)  BR_PREFIX="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; usage ;;
   esac
@@ -73,16 +78,16 @@ case "$CURRENT" in main|master) ;; *) exit 0 ;; esac
 [ -z "$BASE" ] && BASE=$(sb_main_branch "$GIT_ROOT")
 
 SHORT=$(printf '%s' "$SESSION" | tr -c 'a-zA-Z0-9-' '-' | cut -c1-16)
-WT_BRANCH="sandbox-session-$SHORT"
-WT_PATH="$GIT_ROOT/.sandbox/worktrees/$WT_BRANCH"
+WT_BRANCH="$BR_PREFIX-$SHORT"
+WT_PATH="$GIT_ROOT/$WT_DIR/$WT_BRANCH"
 
 MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 
 # TTL check — fresh marker means this session already owns a sandbox
 if sb_marker_is_fresh "$MARKER" "$MARKER_TTL"; then
   existing=$(sb_marker_read_value "$MARKER")
-  if [ -n "$existing" ] && [ -d "$GIT_ROOT/.sandbox/worktrees/$existing" ]; then
-    printf '%s\n' "$GIT_ROOT/.sandbox/worktrees/$existing"
+  if [ -n "$existing" ] && [ -d "$GIT_ROOT/$WT_DIR/$existing" ]; then
+    printf '%s\n' "$GIT_ROOT/$WT_DIR/$existing"
     exit 0
   fi
 fi
@@ -99,17 +104,8 @@ fi
 
 sb_marker_write "$MARKER" "$WT_BRANCH"
 
-# Seed TASK.md template if absent
-if [ ! -f "$WT_PATH/TASK.md" ]; then
-  today=$(date '+%Y-%m-%d' 2>/dev/null || printf 'undated')
-  {
-    printf -- '---\n'
-    printf 'created: %s\n' "$today"
-    printf 'purpose: TODO — replace with a one-line goal for this sandbox\n'
-    printf -- '---\n\n## Tasks\n\n'
-    printf -- '- [ ] TODO — replace with 3-7 concrete deliverables before substantive work\n'
-  } > "$WT_PATH/TASK.md"
-fi
+# Seed TASK.md template (delegated to task-md.sh — single source of truth)
+sb_task_seed_placeholder "$WT_PATH"
 
 printf '%s\n' "$WT_PATH"
 exit 0
