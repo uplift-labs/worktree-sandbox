@@ -18,6 +18,14 @@ assert_file_exists "marker created" "$M"
 assert_eq "value read" "branch-name" "$(sb_marker_read_value "$M")"
 epoch=$(sb_marker_read_epoch "$M")
 assert_contains "epoch numeric" "^[0-9]" "$epoch"
+assert_eq "initial_head absent for legacy write" "" "$(sb_marker_read_initial_head "$M")"
+
+echo "== write with initial_head =="
+M3="$FIXTURE_ROOT/markers/with-head.marker"
+sb_marker_write "$M3" "branch-x" "abc123deadbeef"
+assert_eq "value read (3-arg)" "branch-x" "$(sb_marker_read_value "$M3")"
+assert_eq "initial_head read" "abc123deadbeef" "$(sb_marker_read_initial_head "$M3")"
+assert_contains "epoch still numeric (3-arg)" "^[0-9]" "$(sb_marker_read_epoch "$M3")"
 
 echo "== is_fresh true for new =="
 sb_marker_is_fresh "$M" 60; assert_exit "new is fresh (ttl 60s)" 0 $?

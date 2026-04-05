@@ -14,7 +14,10 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
   silently — they are safety nets, not gatekeepers.
 - **Marker storage:** `<git-common-dir>/sandbox-markers/<session-id>`.
   One small file per active session; first field = branch name, second field
-  = creation epoch. Markers are auto-expired via TTL.
+  = creation epoch, third field = initial HEAD at marker creation (added
+  v0.x — absent in legacy markers). The initial HEAD lets lifecycle Phase 3
+  distinguish "session never committed" from "session committed and merged"
+  when both leave branch == main. Markers are auto-expired via TTL.
 - **Worktree location:** `<repo-root>/.sandbox/worktrees/<branch-name>`.
 
 ## Commands

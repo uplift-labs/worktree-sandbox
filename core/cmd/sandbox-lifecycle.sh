@@ -78,9 +78,15 @@ fi
 # crashed processes, SIGKILL, power loss, and `/clear`/`/compact` reasons
 # (which intentionally skip self-release in session-end.sh).
 #
+# Critical guard: a fresh session whose branch has never diverged from main
+# (HEAD == initial_head stored in the marker) looks structurally identical to
+# a completed+merged session. Without the initial_head check, Phase 3 would
+# reap a live session that simply hasn't started committing yet.
+#
 # Safety: skip branches in mid-rebase / mid-merge / detached-HEAD state —
 # mirrors the `_can_commit` guard in adapters/claude-code/hooks/session-end.sh
 # to avoid reaping a worktree during conflict resolution.
+# Legacy markers (no initial_head field) → skip, fall back to TTL (Phase 2).
 if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
   for mf in "$MARKERS_DIR"/*; do
     [ -f "$mf" ] || continue
@@ -88,6 +94,17 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     [ -z "$_branch" ] && continue
     _sb="$GIT_ROOT/$WT_DIR/$_branch"
     [ -d "$_sb" ] || continue
+
+    # Legacy marker without initial_head — cannot distinguish fresh from
+    # merged; fall back to TTL safety net (Phase 2).
+    _init_head=$(sb_marker_read_initial_head "$mf")
+    [ -z "$_init_head" ] && continue
+
+    # Session never committed anything — branch HEAD still equals the HEAD
+    # at marker creation time. This is a live session that hasn't started
+    # work yet; the marker is still load-bearing.
+    _cur_head=$(git -C "$_sb" rev-parse HEAD 2>/dev/null || true)
+    [ "$_cur_head" = "$_init_head" ] && continue
 
     # In-progress state guards (see session-end.sh Phase 2 rationale).
     _mh=$(git -C "$_sb" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)
@@ -102,7 +119,8 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     fi
     git -C "$_sb" symbolic-ref -q HEAD >/dev/null 2>&1 || continue
 
-    # Merged into main AND clean → marker is no longer load-bearing.
+    # Merged into main AND clean AND session did real work → marker is no
+    # longer load-bearing.
     if git -C "$_sb" merge-base --is-ancestor "$_branch" "$MAIN_BRANCH" 2>/dev/null \
        && sb_scan_uncommitted "$_sb" >/dev/null 2>&1; then
       rm -f "$mf" 2>/dev/null || true
