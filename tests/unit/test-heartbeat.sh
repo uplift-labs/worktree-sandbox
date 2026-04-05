@@ -118,4 +118,71 @@ assert_file_absent "sidecar cleaned after SIGTERM" "${M4}.hb"
 
 kill "$SIG_PID" 2>/dev/null; wait "$SIG_PID" 2>/dev/null || true
 
+# ── 5. Marker-only mode (--pid 0) ──────────────────────────────────
+echo "== marker-only mode (--pid 0) =="
+M5="$MARKERS/marker-only.marker"
+printf 'branch-e %s def456' "$(date +%s)" > "$M5"
+touch -t "$(date -d '-5 minutes' '+%Y%m%d%H%M.%S' 2>/dev/null || date -v-5M '+%Y%m%d%H%M.%S')" "$M5"
+OLD_MTIME5=$(_mtime "$M5")
+
+bash "$HB" --pid 0 --marker "$M5" --interval 1 &
+HB5_PID=$!
+sleep 3
+
+NEW_MTIME5=$(_mtime "$M5")
+assert_eq "marker-only: mtime refreshed" "1" "$([ "$NEW_MTIME5" -gt "$OLD_MTIME5" ] && echo 1 || echo 0)"
+assert_file_exists "marker-only: sidecar created" "${M5}.hb"
+
+# Still alive (no PID to die)
+if kill -0 "$HB5_PID" 2>/dev/null; then
+  _hb5_alive=1
+else
+  _hb5_alive=0
+fi
+assert_eq "marker-only: heartbeat still running" "1" "$_hb5_alive"
+
+kill "$HB5_PID" 2>/dev/null; wait "$HB5_PID" 2>/dev/null || true
+
+# ── 6. Marker-only mode exits on marker deletion ───────────────────
+echo "== marker-only mode exits on marker deletion =="
+M6="$MARKERS/marker-only-del.marker"
+printf 'branch-f %s def789' "$(date +%s)" > "$M6"
+
+bash "$HB" --pid 0 --marker "$M6" --interval 1 &
+HB6_PID=$!
+sleep 2
+
+rm -f "$M6"
+sleep 3
+
+if kill -0 "$HB6_PID" 2>/dev/null; then
+  _hb6_alive=1
+  kill "$HB6_PID" 2>/dev/null; wait "$HB6_PID" 2>/dev/null || true
+else
+  _hb6_alive=0
+fi
+assert_eq "marker-only: exited after marker deleted" "0" "$_hb6_alive"
+assert_file_absent "marker-only: sidecar cleaned" "${M6}.hb"
+
+# ── 7. Max-age safety valve ─────────────────────────────────────────
+echo "== max-age safety valve =="
+M7="$MARKERS/maxage.marker"
+printf 'branch-g %s ghi123' "$(date +%s)" > "$M7"
+
+bash "$HB" --pid 0 --marker "$M7" --interval 1 --max-age 3 &
+HB7_PID=$!
+sleep 5
+
+if kill -0 "$HB7_PID" 2>/dev/null; then
+  _hb7_alive=1
+  kill "$HB7_PID" 2>/dev/null; wait "$HB7_PID" 2>/dev/null || true
+else
+  _hb7_alive=0
+fi
+assert_eq "max-age: heartbeat exited" "0" "$_hb7_alive"
+assert_file_absent "max-age: sidecar cleaned" "${M7}.hb"
+# Marker should still exist (heartbeat stopped, not deleted)
+assert_file_exists "max-age: marker still exists" "$M7"
+rm -f "$M7"
+
 test_summary
