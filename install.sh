@@ -33,9 +33,32 @@ done
 INSTALL_ROOT="$TARGET/.sandbox"
 mkdir -p "$INSTALL_ROOT/core/lib" "$INSTALL_ROOT/core/cmd"
 
+# sync_sh_dir <src_dir> <dest_dir> — mirror *.sh from src into dest.
+# Wipes any *.sh files already in dest so that files renamed or deleted in
+# the source propagate to the install target on re-run. Other contents of
+# dest (runtime state, worktrees, markers) are never touched because we
+# glob on *.sh only and never the directory itself. Copy failures are
+# fatal — a partial install is worse than a clean abort.
+sync_sh_dir() {
+  local src="$1" dest="$2"
+  # Validate source BEFORE wiping dest — a broken source tree must abort
+  # without destroying the previously-installed files.
+  # shellcheck disable=SC2206
+  local files=( "$src"/*.sh )
+  if [ ! -e "${files[0]}" ]; then
+    printf 'install: no *.sh files in %s\n' "$src" >&2
+    exit 1
+  fi
+  rm -f "$dest"/*.sh
+  cp "${files[@]}" "$dest/" || {
+    printf 'install: copy failed %s -> %s\n' "$src" "$dest" >&2
+    exit 1
+  }
+}
+
 printf '[install] copying core to %s\n' "$INSTALL_ROOT/core"
-cp "$SCRIPT_DIR"/core/lib/*.sh  "$INSTALL_ROOT/core/lib/"
-cp "$SCRIPT_DIR"/core/cmd/*.sh  "$INSTALL_ROOT/core/cmd/"
+sync_sh_dir "$SCRIPT_DIR/core/lib" "$INSTALL_ROOT/core/lib"
+sync_sh_dir "$SCRIPT_DIR/core/cmd" "$INSTALL_ROOT/core/cmd"
 chmod +x "$INSTALL_ROOT/core/cmd/"*.sh
 
 GIT_COMMON=$(git -C "$TARGET" rev-parse --git-common-dir 2>/dev/null)
@@ -65,8 +88,8 @@ if [ "$WITH_CC" -eq 1 ]; then
   ADAPTER_DIR="$INSTALL_ROOT/adapter"
   mkdir -p "$ADAPTER_DIR/hooks" "$ADAPTER_DIR/lib"
   printf '[install] copying Claude Code adapter to %s\n' "$ADAPTER_DIR"
-  cp "$SCRIPT_DIR"/adapters/claude-code/lib/*.sh    "$ADAPTER_DIR/lib/"
-  cp "$SCRIPT_DIR"/adapters/claude-code/hooks/*.sh  "$ADAPTER_DIR/hooks/"
+  sync_sh_dir "$SCRIPT_DIR/adapters/claude-code/lib"   "$ADAPTER_DIR/lib"
+  sync_sh_dir "$SCRIPT_DIR/adapters/claude-code/hooks" "$ADAPTER_DIR/hooks"
   chmod +x "$ADAPTER_DIR/hooks/"*.sh
 
   SNIPPET="$SCRIPT_DIR/adapters/claude-code/settings-hooks.json"

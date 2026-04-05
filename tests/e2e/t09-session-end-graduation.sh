@@ -165,6 +165,33 @@ rm -f "$FP_SB/TASK.md"
 bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
 assert_dir_absent "next lifecycle reaps after fast-path" "$FP_SB"
 
+echo "== SessionEnd fast-path: empty session (no commits) drops its own marker =="
+# Regression: user-reported bug. Open session, do nothing, close. The branch
+# tip equals main tip (trivially an ancestor) and the only on-disk delta is
+# the seeded TASK.md (filtered by scan-uncommitted). Fast-path must fire so
+# the next SessionStart's lifecycle reaps the empty worktree — otherwise
+# empty sandboxes accumulate and survive until the 3600s TTL expires.
+EMPTY_SESSION="t09-empty"
+EMPTY_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$EMPTY_SESSION")
+printf '%s' "$EMPTY_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
+EMPTY_SB="$REPO/.sandbox/worktrees/sandbox-session-$EMPTY_SESSION"
+EMPTY_MARKER="$REPO/.git/sandbox-markers/$EMPTY_SESSION"
+assert_dir_exists "empty sandbox created" "$EMPTY_SB"
+assert_file_exists "empty sandbox marker created" "$EMPTY_MARKER"
+assert_file_exists "empty sandbox has seeded TASK.md" "$EMPTY_SB/TASK.md"
+# Sanity: branch tip == main tip (no commits made in the session).
+EMPTY_TIP=$(git -C "$EMPTY_SB" rev-parse HEAD)
+MAIN_TIP=$(git -C "$REPO" rev-parse HEAD)
+assert_eq "branch tip equals main tip" "$MAIN_TIP" "$EMPTY_TIP"
+# User closes the session without doing anything.
+EMPTY_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$EMPTY_SESSION")
+printf '%s' "$EMPTY_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+# Fast-path must have released the marker.
+assert_file_absent "empty-session fast-path dropped marker" "$EMPTY_MARKER"
+# Next lifecycle pass reaps the empty worktree (TASK.md is filtered by scan).
+bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
+assert_dir_absent "next lifecycle reaps empty sandbox" "$EMPTY_SB"
+
 echo "== SessionEnd fast-path: unmerged branch keeps marker (safety-net) =="
 # Same setup but do NOT merge the branch. Fast-path must NOT fire.
 FP2_SESSION="t09-fp2"
