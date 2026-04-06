@@ -50,8 +50,18 @@ ORPHAN_HB_GRACE=7200  # 2 hours
 #                                        1 if grace expired
 _sb_hb_is_session_alive() {
   local _hb_path="$1" _marker_path="$2"
-  local _content _parent_wp _monitored_pid
+  local _content _parent_wp _monitored_pid _field_count
   _content=$(cat "$_hb_path" 2>/dev/null) || return 0
+
+  # Legacy sidecar format (single field — heartbeat PID only, no parent/
+  # monitored PID).  Written by older code before the 3-field format was
+  # introduced.  Cannot verify session liveness — treat as dead so that
+  # the caller kills the zombie heartbeat and proceeds with TTL reclaim.
+  _field_count=$(printf '%s' "$_content" | awk '{print NF}')
+  if [ "${_field_count:-0}" -lt 2 ]; then
+    return 1
+  fi
+
   _parent_wp=$(printf '%s' "$_content" | awk '{print $2}')
   _monitored_pid=$(printf '%s' "$_content" | awk '{print $3}')
 
@@ -123,6 +133,23 @@ if [ -d "$MARKERS_DIR" ]; then
   for mf in "$MARKERS_DIR"/*; do
     [ -f "$mf" ] || continue
     [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
+
+    # Orphan marker: if the marker's worktree directory no longer exists,
+    # the marker protects nothing — clean it up unconditionally.  This
+    # covers the case where a worktree was manually removed or cleaned by
+    # another process while the heartbeat kept the marker alive.
+    _m_branch=$(sb_marker_read_value "$mf")
+    if [ -n "$_m_branch" ]; then
+      _m_wt="$GIT_ROOT/$WT_DIR/$_m_branch"
+      if [ ! -d "$_m_wt" ]; then
+        if [ -f "${mf}.hb" ]; then
+          _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
+          [ -n "$_hb_pid" ] && kill "$_hb_pid" 2>/dev/null || true
+        fi
+        rm -f "$mf" "${mf}.hb" 2>/dev/null || true
+        continue
+      fi
+    fi
 
     # If heartbeat sidecar exists and its PID is alive, verify the parent
     # Claude Code process is also alive before trusting the heartbeat.
