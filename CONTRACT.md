@@ -83,14 +83,29 @@ sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]
 | Flag              | Required | Default               | Description              |
 |-------------------|----------|-----------------------|--------------------------|
 | `--repo`          | yes      | —                     | Main repo path           |
-| `--ttl`           | no       | `5`                   | Marker TTL (stale reclaim) |
+| `--ttl`           | no       | `5`                   | Marker TTL in seconds (stale reclaim) |
 | `--branch-prefix` | no       | `sandbox-session-*`   | Glob for orphan branch sweep |
+| `--worktrees-dir` | no       | `.sandbox/worktrees`  | Worktree directory relative to repo root |
 
 **Phases:** prune metadata → reclaim stale markers (TTL, with heartbeat
 sidecar PID check and 30s grace period for freshly-created markers) →
 proactive marker release for merged+clean sandboxes (with heartbeat
 sidecar PID check; ignores TTL, closes the crashed-session immortal-orphan
 gap) → clean merged worktrees → sweep orphan branches → sweep residual dirs.
+
+**Timing constants** (hardcoded in `sandbox-lifecycle.sh`):
+
+| Constant             | Value    | Purpose                                                                                  |
+|----------------------|----------|------------------------------------------------------------------------------------------|
+| `ORPHAN_HB_GRACE`   | `7200`s  | Grace period for heartbeats with unknown parent (winpid=0). After 2h from marker creation, lifecycle kills the heartbeat as a presumed orphan. |
+| `FRESH_SESSION_TTL`  | `300`s   | Extended TTL for sessions that never committed (HEAD == init_head). Protects live sessions whose heartbeat died early. |
+
+**Timing constants** (hardcoded in `heartbeat.sh`):
+
+| Constant             | Value    | Purpose                                                                                  |
+|----------------------|----------|------------------------------------------------------------------------------------------|
+| `MAX_AGE`            | `86400`s | Safety valve: heartbeat self-terminates after 24h to prevent immortal orphans in marker-only mode. |
+| `WINPID_CHECK_EVERY` | `5`      | Check Windows parent PID every N ticks (wmic is ~200ms per call).                        |
 
 **Exit:** always `0`. Prints a multi-line report on stdout if any action was
 taken; silent otherwise.
