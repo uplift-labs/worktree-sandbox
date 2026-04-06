@@ -1,5 +1,5 @@
 #!/bin/bash
-# sandbox-init.sh — create a session sandbox worktree with a seeded TASK.md.
+# sandbox-init.sh — create a session sandbox worktree.
 #
 # Usage:
 #   sandbox-init.sh --repo <dir> --session <id> [--base <branch>]
@@ -13,7 +13,7 @@
 #   - If the current dir is already inside a linked worktree, no-op (exit 0).
 #   - If the session already has a fresh marker (TTL 24h), no-op.
 #   - Otherwise: create <repo>/.sandbox/worktrees/<session>, a branch
-#     sandbox-session-<short-id>, seed TASK.md template, write marker.
+#     sandbox-session-<short-id>, write marker.
 #   - Echoes the absolute sandbox path to stdout on success.
 #
 # Exit:
@@ -26,7 +26,6 @@ CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/git-context.sh"
 . "$ROOT/core/lib/ttl-marker.sh"
-. "$ROOT/core/lib/task-md.sh"
 
 MARKER_TTL=86400  # 24h
 
@@ -104,9 +103,6 @@ fi
 
 INIT_HEAD=$(git -C "$WT_PATH" rev-parse HEAD 2>/dev/null || true)
 sb_marker_write "$MARKER" "$WT_BRANCH" "$INIT_HEAD"
-
-# Seed TASK.md template (delegated to task-md.sh — single source of truth)
-sb_task_seed_placeholder "$WT_PATH"
 
 printf '%s\n' "$WT_PATH"
 exit 0

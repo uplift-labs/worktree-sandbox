@@ -9,7 +9,7 @@
 #   sb_wt_remove_if_merged <repo-dir> <wt-path> <wt-branch> <main-branch> [detail]
 #     Safety order:
 #       1. merge-base ancestor check — not merged → preserve (exit 1)
-#       2. scan_uncommitted — filesystem dirty or live TASK.md → preserve (exit 2)
+#       2. scan_uncommitted — filesystem dirty → preserve (exit 2)
 #       3. git worktree remove + branch -d
 #     Exit codes:
 #       0 = removed

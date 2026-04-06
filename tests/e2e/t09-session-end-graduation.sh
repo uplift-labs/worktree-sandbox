@@ -1,12 +1,11 @@
 #!/bin/bash
 # t09 — SessionEnd durability + housekeeping (commit-only, no auto-merge).
 # Covers:
-#   - Multiple Stop turns with a fully-checked TASK.md keep the sandbox alive.
+#   - Multiple Stop turns with a clean sandbox keep the sandbox alive.
 #   - SessionEnd reason=clear / compact are heartbeat-only.
 #   - SessionEnd reason=prompt_input_exit captures pending work as a commit
 #     on the sandbox branch, WITHOUT merging into main.
 #   - SessionEnd skips commit when the tree is already clean.
-#   - TASK.md is excluded from the capture-commit.
 #   - In-progress merge state blocks the capture-commit (graceful skip).
 #   - After a manual merge, lifecycle reaps the now merged+clean sandbox
 #     (Phase 3) on its next pass (guarded by live-marker protection, so the
@@ -38,14 +37,6 @@ echo "== multi-turn: Stop with passing gate keeps sandbox alive across turns =="
 # Commit real work so scan-uncommitted is happy.
 echo "payload" > "$SB_PATH/feature.txt"
 (cd "$SB_PATH" && git add feature.txt && git commit -q -m "feat: payload")
-cat > "$SB_PATH/TASK.md" << 'TM'
----
-created: 2026-04-05
-purpose: t09 multi-turn test
----
-## Tasks
-- [x] Ship payload
-TM
 
 STOP_IN=$(printf '{"session_id":"%s"}' "$SESSION")
 for turn in 1 2 3; do
@@ -83,22 +74,16 @@ assert_file_absent "main still untouched" "$REPO/feature.txt"
 echo "== SessionEnd real termination: pending work is captured as commit, main untouched =="
 echo "new work" > "$SB_PATH/new.txt"
 echo "modify" >> "$SB_PATH/feature.txt"
-# Modify TASK.md too — must be EXCLUDED from the commit.
-echo "- [x] Extra note" >> "$SB_PATH/TASK.md"
 printf '%s' "$END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
 TIP_AFTER=$(git -C "$SB_PATH" rev-parse HEAD)
 assert_contains "new commit created" "$TIP_AFTER" "$(git -C "$SB_PATH" rev-parse HEAD)"
 # Capture-commit subject.
 LAST_SUBJ=$(git -C "$SB_PATH" log -1 --format=%s)
 assert_contains "commit subject mentions capture" "capture pending work" "$LAST_SUBJ"
-# Commit contains new.txt and feature.txt, but NOT TASK.md.
+# Commit contains new.txt and feature.txt.
 CHANGED=$(git -C "$SB_PATH" show --name-only --format='' HEAD)
 assert_contains "new.txt in capture commit" "new.txt" "$CHANGED"
 assert_contains "feature.txt in capture commit" "feature.txt" "$CHANGED"
-assert_not_contains "TASK.md NOT in capture commit" "TASK.md" "$CHANGED"
-# TASK.md should still be a local modification in the worktree.
-TASK_STATUS=$(git -C "$SB_PATH" status --porcelain TASK.md)
-assert_contains "TASK.md still dirty in worktree" "TASK.md" "$TASK_STATUS"
 # Main branch is still untouched — the whole point of the refactor.
 assert_file_absent "main never got feature.txt" "$REPO/feature.txt"
 assert_file_absent "main never got new.txt" "$REPO/new.txt"
@@ -129,8 +114,6 @@ echo "== manual merge + lifecycle reaps the merged+clean sandbox =="
 # User merges the branch manually.
 (cd "$REPO" && git merge "$BRANCH" --no-edit >/dev/null 2>&1)
 assert_file_exists "work landed in main after manual merge" "$REPO/feature.txt"
-# Remove TASK.md from the worktree so it counts as clean for Phase 3.
-rm -f "$SB_PATH/TASK.md"
 # Drop the marker so lifecycle's live-marker protection does not skip.
 rm -f "$MARKER"
 bash "$LIFECYCLE" --repo "$REPO" >/dev/null 2>&1
@@ -155,10 +138,7 @@ echo "fp-payload" > "$FP_SB/fp.txt"
 (cd "$FP_SB" && git add fp.txt && git commit -q -m "feat: fp payload")
 (cd "$REPO" && git merge "$FP_BRANCH" --no-edit >/dev/null 2>&1)
 assert_file_exists "fp work landed in main" "$REPO/fp.txt"
-# Drop TASK.md so scan-uncommitted reports clean (TASK.md is filtered, but
-# any other untracked file would block). Our seeded TASK.md is the only
-# extra, and it's filtered out already — no rm needed. Real SessionEnd
-# termination on clean+merged sandbox:
+# Real SessionEnd termination on clean+merged sandbox:
 FP_END_IN=$(printf '{"session_id":"%s","reason":"prompt_input_exit"}' "$FP_SESSION")
 printf '%s' "$FP_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
 # Fast-path should have removed the marker...
@@ -169,11 +149,8 @@ assert_dir_absent "fast-path self-reaped worktree in the same hook" "$FP_SB"
 
 echo "== SessionEnd fast-path: empty session (no commits) self-reaps its worktree =="
 # Regression: user-reported bug. Open session, do nothing, close. The branch
-# tip equals main tip (trivially an ancestor) and the only on-disk delta is
-# the seeded TASK.md (filtered by scan-uncommitted). Fast-path must fire
-# AND lifecycle must immediately reap the worktree — the user's
-# expectation is that closing the host tool leaves no empty sandbox
-# behind, not that the sandbox lingers until the next SessionStart.
+# tip equals main tip (trivially an ancestor) and the worktree is clean.
+# Fast-path must fire AND lifecycle must immediately reap the worktree.
 EMPTY_SESSION="t09-empty"
 EMPTY_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$EMPTY_SESSION")
 printf '%s' "$EMPTY_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
@@ -181,7 +158,6 @@ EMPTY_SB="$REPO/.sandbox/worktrees/sandbox-session-$EMPTY_SESSION"
 EMPTY_MARKER="$REPO/.git/sandbox-markers/$EMPTY_SESSION"
 assert_dir_exists "empty sandbox created" "$EMPTY_SB"
 assert_file_exists "empty sandbox marker created" "$EMPTY_MARKER"
-assert_file_exists "empty sandbox has seeded TASK.md" "$EMPTY_SB/TASK.md"
 # Sanity: branch tip == main tip (no commits made in the session).
 EMPTY_TIP=$(git -C "$EMPTY_SB" rev-parse HEAD)
 MAIN_TIP=$(git -C "$REPO" rev-parse HEAD)

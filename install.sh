@@ -79,7 +79,7 @@ cat > "$HOOK" << 'HOOK_EOF'
 # legitimate merge content as dirty and block every non-ff sandbox merge.
 #
 # The gate's real job is to validate the BRANCH being merged — its
-# TASK.md completion and worktree state — not the target that is about
+# worktree state (filesystem cleanliness) — not the target that is about
 # to receive it. Since MERGE_HEAD does not exist yet at this point,
 # `git rev-parse MERGE_HEAD` fails, and we use the environment instead:
 # git exports `GITHEAD_<sha>=<branch-name>` for each head being merged.

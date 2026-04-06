@@ -43,21 +43,3 @@ fixture_worktree() {
   printf '%s' "$wt"
 }
 
-fixture_taskmd() {
-  local path="$1" purpose="$2" boxes="$3"
-  local today
-  today=$(date '+%Y-%m-%d')
-  {
-    printf -- '---\n'
-    printf 'created: %s\n' "$today"
-    printf 'purpose: %s\n' "$purpose"
-    printf -- '---\n\n## Tasks\n\n'
-    local IFS='|'
-    for b in $boxes; do
-      case "$b" in
-        x*) printf -- '- [x] %s\n' "${b#x }" ;;
-        *)  printf -- '- [ ] %s\n' "${b# }"  ;;
-      esac
-    done
-  } > "$path/TASK.md"
-}

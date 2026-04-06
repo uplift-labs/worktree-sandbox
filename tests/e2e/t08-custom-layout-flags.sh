@@ -30,7 +30,6 @@ assert_dir_exists "sandbox in custom layout" "$REPO/$CUSTOM_DIR/$CUSTOM_PREFIX-$
 # The dir-exists check above already proves the custom layout is honoured.
 assert_contains "returned path has custom prefix" "$CUSTOM_PREFIX-$SESSION" "$SB"
 assert_contains "returned path has custom dir" "$CUSTOM_DIR" "$SB"
-assert_file_exists "TASK.md seeded in custom layout" "$SB/TASK.md"
 
 echo "== default layout is not used when flags given =="
 assert_dir_absent "no .sandbox dir" "$REPO/.sandbox"
@@ -40,7 +39,6 @@ printf 'feature\n' > "$SB/feature.txt"
 (cd "$SB" && git add feature.txt && git commit -q -m "feat: add feature")
 (cd "$REPO" && git merge -q "$CUSTOM_PREFIX-$SESSION")
 rm -f "$REPO/.git/sandbox-markers/$SESSION"
-rm -f "$SB/TASK.md"
 
 out=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" \
   --repo "$REPO" \

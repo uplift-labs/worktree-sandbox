@@ -4,8 +4,7 @@
 #
 # Responsibility: durability, not graduation.
 #   1. Capture-commit any pending work in the current sandbox so nothing is
-#      lost when the process exits. TASK.md is excluded from the commit
-#      (scratchpad, must not pollute main on any future manual merge).
+#      lost when the process exits.
 #   2. Invoke sandbox-lifecycle to reap *other* sandboxes whose branches
 #      have already been merged into main and whose worktrees are clean.
 #
@@ -90,12 +89,9 @@ if [ "$_can_commit" = 1 ] && ! git -C "$SB" symbolic-ref -q HEAD >/dev/null 2>&1
 fi
 
 if [ "$_can_commit" = 1 ]; then
-  # Stage everything, then unstage TASK.md. TASK.md is a per-session
-  # scratchpad and must never enter the branch history.
   git -C "$SB" add -A >/dev/null 2>&1 || true
-  git -C "$SB" reset -q -- TASK.md >/dev/null 2>&1 || true
 
-  # Commit iff something is actually staged after the TASK.md unstage.
+  # Commit iff something is actually staged.
   if ! git -C "$SB" diff --cached --quiet >/dev/null 2>&1; then
     if ! git -C "$SB" commit -q -m "chore(session-end): capture pending work on exit" >/dev/null 2>&1; then
       printf '[sandbox] SessionEnd: capture-commit failed on %s — sandbox left as-is.\n' "$BRANCH" >&2
@@ -106,7 +102,7 @@ fi
 # --- Phase 2: fast-path self-release for the current session -------------
 #
 # If our own branch is already merged into main AND the worktree is clean
-# (scan-uncommitted excludes TASK.md) AND there is no in-progress
+# AND there is no in-progress
 # merge/rebase/detached-HEAD state (_can_commit=1), drop our marker NOW
 # so the lifecycle pass below treats our worktree as unprotected and
 # reaps it in the same invocation — otherwise the empty/merged sandbox

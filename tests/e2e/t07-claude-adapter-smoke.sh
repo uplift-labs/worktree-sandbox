@@ -40,31 +40,14 @@ assert_contains "output is Claude hookSpecificOutput JSON" "hookSpecificOutput" 
 assert_contains "decision is deny" "\"permissionDecision\":\"deny\"" "$OUT"
 assert_contains "reason present" "permissionDecisionReason" "$OUT"
 
-echo "== stop: TASK.md placeholder blocks merge via decision:block JSON =="
-# sandbox-init seeded a TODO TASK.md → merge-gate should fire
+echo "== stop: clean sandbox passes gate (no block) =="
+# Commit real work so scan-uncommitted is happy.
+echo "work content" > "$SB_PATH/work.txt"
+(cd "$SB_PATH" && git add work.txt && git commit -q -m "feat: add work")
 STOP_IN=$(printf '{"session_id":"%s"}' "$SESSION")
 OUT=$(printf '%s' "$STOP_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/stop.sh" 2>&1)
 ec=$?
 assert_exit "stop exits 0" 0 "$ec"
-assert_contains "decision block emitted" "\"decision\":\"block\"" "$OUT"
-assert_contains "reason mentions TASK.md" "TASK.md" "$OUT"
-# Sandbox must still exist after block
-assert_dir_exists "sandbox preserved on block" "$SB_PATH"
-
-echo "== stop: after filling TASK.md and committing real work, gate passes but sandbox stays alive =="
-echo "work content" > "$SB_PATH/work.txt"
-(cd "$SB_PATH" && git add work.txt && git commit -q -m "feat: add work")
-cat > "$SB_PATH/TASK.md" << 'TM'
----
-created: 2026-04-05
-purpose: Smoke-test adapter
----
-## Tasks
-- [x] Add work file
-TM
-OUT=$(printf '%s' "$STOP_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/stop.sh" 2>&1)
-ec=$?
-assert_exit "stop exits 0 after fix" 0 "$ec"
 assert_not_contains "no block on passing gate" "\"decision\":\"block\"" "$OUT"
 # New invariant: Stop must NOT graduate. Sandbox, marker, and untouched main stay put.
 assert_dir_exists "sandbox preserved on Stop" "$SB_PATH"

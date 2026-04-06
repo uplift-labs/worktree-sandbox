@@ -1,31 +1,27 @@
 # singularity-sandbox
 
-> Git worktree + TASK.md + auto-cleanup isolation for AI-assisted (and human)
-> development. Keeps main untouchable. Makes session scope explicit. Cleans
-> up after itself. No dependencies beyond bash and git.
+> Git worktree isolation + auto-cleanup for AI-assisted (and human)
+> development. Keeps main untouchable. Cleans up after itself.
+> No dependencies beyond bash and git.
 
 ## What this solves
 
-Three recurring failure modes in AI-assisted development:
+Two recurring failure modes in AI-assisted development:
 
 1. **Main branch contamination.** The assistant edits main directly, leaving
    half-finished work checked out in the primary branch.
-2. **Implicit scope.** Nobody — human or AI — can point at a file and say
-   "this is what the current session promised to deliver." Scope lives in
-   chat and dies at context compaction.
-3. **Abandoned state.** Crashed sessions leave stale worktrees, orphan
+2. **Abandoned state.** Crashed sessions leave stale worktrees, orphan
    branches, and marker files that pile up for months.
 
-singularity-sandbox fixes all three with a tiny tool-agnostic bash layer.
+singularity-sandbox fixes both with a tiny tool-agnostic bash layer.
 
 ## How it works
 
 - **Sandbox per session.** `sandbox-init` creates a git worktree at
-  `.sandbox/worktrees/sandbox-session-<id>` and seeds a placeholder `TASK.md`.
+  `.sandbox/worktrees/sandbox-session-<id>`.
   All subsequent edits happen there; main is never touched by the assistant.
-- **Explicit scope.** `TASK.md` at the sandbox root lists 3-7 concrete
-  deliverables as checkboxes. `sandbox-merge-gate` refuses the merge while
-  any box is unchecked.
+- **Merge gate.** `sandbox-merge-gate` refuses the merge while the worktree
+  has uncommitted changes (tracked modifications or untracked files).
 - **Safe cleanup.** `sandbox-lifecycle` prunes merged sandboxes, reclaims
   crashed sessions via TTL-expired markers, and preserves anything with
   unsaved work on disk.
@@ -61,15 +57,9 @@ bash .sandbox/core/cmd/sandbox-init.sh --repo "$PWD" --session demo
 #  prints: <repo>/.sandbox/worktrees/sandbox-session-demo
 cd .sandbox/worktrees/sandbox-session-demo
 
-# Replace the TODO placeholders in TASK.md with real work
-$EDITOR TASK.md
-
 # Do work
 echo "hello" > feature.txt
 git add feature.txt && git commit -m "feat: add feature"
-
-# Check off TASK.md boxes as you go
-$EDITOR TASK.md
 
 # Try to merge — the pre-merge-commit hook runs the gate
 cd ..
@@ -85,10 +75,10 @@ Four public commands. Full contract in `CONTRACT.md`.
 
 | Command                   | Purpose                                                    |
 |---------------------------|------------------------------------------------------------|
-| `sandbox-init.sh`         | Create session sandbox worktree + seed `TASK.md`.          |
+| `sandbox-init.sh`         | Create session sandbox worktree.                           |
 | `sandbox-guard.sh`        | Path gate: is an edit allowed given the active sandbox?    |
 | `sandbox-lifecycle.sh`    | Periodic cleanup (merged, stale, orphan, residual).        |
-| `sandbox-merge-gate.sh`   | Pre-merge validation (`TASK.md` + filesystem).             |
+| `sandbox-merge-gate.sh`   | Pre-merge validation (filesystem cleanliness).             |
 
 ## Adapters
 
@@ -133,16 +123,12 @@ at session end. Its job is deliberately small:
 
 1. **Heartbeat** the marker (`touch`) so lifecycle's TTL reclaim treats the
    session as live even on long, quiet turns.
-2. Run `sandbox-merge-gate` as a **read-only** check. On failure (unchecked
-   `TASK.md`, tracked modifications, untracked files) emit
+2. Run `sandbox-merge-gate` as a **read-only** check. On failure (tracked
+   modifications, untracked files) emit
    `{"decision":"block","reason":"..."}` so the agent gets a chance to fix
    it on the next turn.
 3. On success — do nothing else. **No merge. No cleanup. No marker removal.**
    The sandbox stays alive for the next turn.
-
-This is the load-bearing change vs earlier versions. `Stop` firing per turn
-means any graduation logic here will destroy a live sandbox the first time
-`TASK.md` happens to be fully checked.
 
 ### Phase C — Durability + housekeeping (SessionEnd)
 
@@ -165,14 +151,11 @@ Steps on real termination:
 
 1. Guard against in-progress states (`MERGE_HEAD`, rebase dirs, detached
    HEAD) — skip the commit phase if any apply, logging to stderr.
-2. Stage everything in the sandbox (`git add -A`), then unstage `TASK.md`
-   so the per-session scratchpad never enters the branch history.
-3. If anything is still staged, commit with
+2. Stage everything in the sandbox (`git add -A`).
+3. If anything is staged, commit with
    `chore(session-end): capture pending work on exit`. Project pre-commit
    hooks run normally; failures are logged and the sandbox is left as-is.
-4. Refresh this session's marker mtime (closes the TTL-mismatch window
-   against lifecycle's 1h prune vs sandbox-init's 24h fresh window).
-5. Invoke `sandbox-lifecycle.sh --repo <REPO>`. Lifecycle reaps *other*
+4. Invoke `sandbox-lifecycle.sh --repo <REPO>`. Lifecycle reaps *other*
    sandboxes whose branches are ancestors of `main` and whose worktrees
    are clean — the current session's branch is protected because its
    marker is live.
@@ -212,9 +195,9 @@ of every normal session:
    fresh — see TTL note below).
 3. **Clean merged worktrees**: for each worktree whose branch is a live
    marker's branch → skip. Otherwise, if the branch is an ancestor of main
-   AND the tree has no tracked modifications or untracked files (TASK.md
-   is excluded from the dirty check), remove the worktree and delete the
-   branch. Anything unmerged or dirty is preserved.
+   AND the tree has no tracked modifications or untracked files,
+   remove the worktree and delete the branch. Anything unmerged or dirty
+   is preserved.
 4. **Orphan branch sweep**: delete branches matching `sandbox-session-*`
    that no worktree references and that are ancestors of main.
 5. **Residual dir sweep**: remove empty `.sandbox/worktrees/*` directories
@@ -255,13 +238,12 @@ bash tests/run.sh e2e      # e2e only
 ```
 
 All tests use real temporary git repos via `mktemp -d` + `git init`. No mocks.
-Current coverage: 5 unit files, 7 e2e scenarios, ~130 assertions.
 
 ## Why bash?
 
 - Zero runtime dependencies. bash and git exist everywhere the audience lives.
 - Git hooks are bash anyway — one language, one translation layer.
-- The entire public surface is ~1000 lines, lint-clean under `shellcheck`.
+- The entire public surface is ~800 lines, lint-clean under `shellcheck`.
   A rewrite in any compiled language would add install friction without
   changing what the tool can do.
 

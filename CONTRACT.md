@@ -39,7 +39,7 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
 
 ### `sandbox-init`
 
-Create a session sandbox worktree with a seeded `TASK.md` template.
+Create a session sandbox worktree.
 
 ```
 sandbox-init.sh --repo <dir> --session <id> [--base <branch>]
@@ -97,12 +97,10 @@ Pre-merge validation. Call from `pre-merge-commit` git hook or session-stop
 wrapper.
 
 ```
-sandbox-merge-gate.sh --worktree <dir> [--strict-tasks]
+sandbox-merge-gate.sh --worktree <dir>
 ```
 
-Blocks merge if: `TASK.md` has unchecked boxes, OR filesystem has tracked
-modifications / untracked files, OR (with `--strict-tasks`) `TASK.md` is
-missing.
+Blocks merge if: filesystem has tracked modifications / untracked files.
 
 **Exit:** `0` ok to merge / `1` blocked (reason on stdout) / `2` bad usage.
 
@@ -116,11 +114,11 @@ load-bearing — don't collapse them:
 | `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox, launch background heartbeat to keep marker fresh while Claude Code PID is alive. |
 | `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
 | `Stop`         | `stop.sh`           | **Per-turn read-only gate + marker heartbeat.** Never merges, never cleans. Emits `{"decision":"block",...}` if the worktree is unmergeable so the agent gets a chance to fix it on the next turn. |
-| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, (1) capture-commit any pending tracked mods + untracked files in the current sandbox (excluding `TASK.md`) so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
+| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, (1) capture-commit any pending tracked mods + untracked files in the current sandbox so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
 
 **Why the split:** Claude Code's `Stop` hook fires after every agent turn,
 not at session end. Any merge or cleanup in `Stop` would destroy a live
-sandbox mid-conversation the first time `TASK.md` is fully checked.
+sandbox mid-conversation.
 
 **Why SessionEnd does not merge:** auto-merging on exit is too aggressive —
 the user may want to review the diff, rebase, or discard. SessionEnd's only
@@ -141,7 +139,7 @@ branch name matches the sandbox prefix and the original commits are in
 
 | Hook               | Purpose                                                        |
 |--------------------|----------------------------------------------------------------|
-| `pre-merge-commit` | Gates sandbox merges via `sandbox-merge-gate` — validates TASK.md completion and worktree cleanliness of the branch being merged. |
+| `pre-merge-commit` | Gates sandbox merges via `sandbox-merge-gate` — validates worktree cleanliness of the branch being merged. |
 | `post-merge`       | Re-runs `install.sh` after every merge so `.sandbox/` stays in sync with source. Runs in background; fail-open. Auto-detects `--with-claude-code` if adapter is already installed. |
 
 ## Library functions

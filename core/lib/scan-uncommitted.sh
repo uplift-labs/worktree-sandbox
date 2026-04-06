@@ -9,21 +9,13 @@
 # Signals checked:
 #   (a) tracked modifications or staged changes (git status --porcelain, non-'??')
 #   (b) untracked files not covered by .gitignore ('??' lines)
-#
-# TASK.md is the sandbox's own metadata and is excluded from both counts — it is
-# never user work. Fresh-sandbox preservation (the case where a brand-new sandbox
-# has only a seeded TASK.md and no other state) is handled one layer up by the
-# lifecycle command via marker protection, not here. Keeping scan_uncommitted
-# semantics clean ("is there unsaved user work on disk?") makes it reusable by
-# pre-merge hooks and other callers.
 
 sb_scan_uncommitted() {
   local wt_path="$1"
   [ ! -d "$wt_path" ] && return 0
 
   local status tracked untracked
-  # Filter TASK.md entries (both modified and untracked) out of the scan.
-  status=$(git -C "$wt_path" status --porcelain 2>/dev/null | grep -v ' TASK\.md$')
+  status=$(git -C "$wt_path" status --porcelain 2>/dev/null)
   if [ -z "$status" ]; then
     tracked=0
     untracked=0

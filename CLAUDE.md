@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`singularity-sandbox` is a tool-agnostic bash layer that enforces git-worktree isolation, explicit `TASK.md` scope, and TTL-based cleanup for AI-assisted (and human) sessions. Zero runtime dependencies beyond `bash` and `git`. Target environments: Linux, macOS, Git Bash / WSL on Windows. All code must stay lint-clean under `shellcheck` (config in `.shellcheckrc`).
+`singularity-sandbox` is a tool-agnostic bash layer that enforces git-worktree isolation and TTL-based cleanup for AI-assisted (and human) sessions. Zero runtime dependencies beyond `bash` and `git`. Target environments: Linux, macOS, Git Bash / WSL on Windows. All code must stay lint-clean under `shellcheck` (config in `.shellcheckrc`).
 
 The parent repo `D:\singularity\CLAUDE.md` applies on top of this file — guard conventions, worktree discipline, and commit discipline in that file override defaults.
 
@@ -29,7 +29,7 @@ All tests create real temporary git repos via `mktemp -d` + `git init`. There ar
 ### Two-layer split: `core/` is the contract, `adapters/` are translators
 
 - **`core/cmd/*.sh`** — stable public CLI. Four scripts: `sandbox-init`, `sandbox-guard`, `sandbox-lifecycle`, `sandbox-merge-gate`. Inputs are CLI flags + env vars only (never JSON on stdin). Outputs are human-readable text. Exit codes follow a fixed convention: `0` = allow/success, `1` = deny/blocked with reason on stdout, `2` = bad usage. Full spec lives in `CONTRACT.md` and must be kept in sync when flags change.
-- **`core/lib/*.sh`** — internal helpers, sourced by `core/cmd/` scripts. Not part of the public contract; callers outside `core/` must not source these directly. Header comments in each file are the reference. Current libs: `git-context.sh`, `scan-uncommitted.sh`, `task-md.sh`, `ttl-marker.sh`, `wt-cleanup.sh`.
+- **`core/lib/*.sh`** — internal helpers, sourced by `core/cmd/` scripts. Not part of the public contract; callers outside `core/` must not source these directly. Header comments in each file are the reference. Current libs: `git-context.sh`, `scan-uncommitted.sh`, `ttl-marker.sh`, `wt-cleanup.sh`.
 - **`adapters/<host>/`** — thin translation layers (~30-50 lines per hook) that read a host tool's native input format (Claude Code JSON on stdin, git hook args, etc.), extract what they need, call `core/cmd/*` with flags, and translate the exit code + stdout back into the host's decision format. Adding a new host means writing a new adapter dir, never modifying `core/`.
 
 ### Fail-open safety-net policy
@@ -49,7 +49,7 @@ Every file-based marker must carry an expiry — crashed sessions leave immortal
 
 ### Merge gate is the enforcement point
 
-`sandbox-merge-gate.sh` is invoked by the installed `pre-merge-commit` hook (and, in the Claude Code adapter, by the `stop` hook). It blocks merge iff `TASK.md` has unchecked boxes OR the worktree has tracked modifications / untracked files OR (with `--strict-tasks`) `TASK.md` is missing. This is the single point where session scope becomes a hard requirement — changes here affect every downstream host.
+`sandbox-merge-gate.sh` is invoked by the installed `pre-merge-commit` hook (and, in the Claude Code adapter, by the `stop` hook). It blocks merge iff the worktree has tracked modifications / untracked files. This is the single point where worktree cleanliness becomes a hard requirement — changes here affect every downstream host.
 
 ## Conventions specific to this repo
 
