@@ -5,6 +5,45 @@
 
 Git worktree isolation and automatic cleanup for AI-assisted development sessions. Keeps `main` untouched. Cleans up after itself. Zero dependencies beyond `bash` and `git`.
 
+## Quickstart
+
+Install into your project (one command, nothing to clone manually):
+
+```bash
+cd /path/to/your/project
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh)
+```
+
+Or with the Claude Code adapter:
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh) --with-claude-code
+```
+
+That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
+
+<details>
+<summary>Manual usage (after install)</summary>
+
+```bash
+# Create a sandbox (from main)
+bash .sandbox/core/cmd/sandbox-init.sh --repo "$PWD" --session demo
+cd .sandbox/worktrees/sandbox-session-demo
+
+# Work freely
+echo "hello" > feature.txt
+git add feature.txt && git commit -m "feat: add feature"
+
+# Merge back (pre-merge-commit hook validates cleanliness)
+cd /path/to/repo
+git merge sandbox-session-demo
+
+# Clean up (automatic on next session start, or manual)
+bash .sandbox/core/cmd/sandbox-lifecycle.sh --repo "$PWD"
+```
+
+</details>
+
 ## The problem
 
 AI coding assistants (Claude Code, Cursor, Copilot Workspace, etc.) operate inside your git repository. Without guardrails, two things go wrong repeatedly:
@@ -74,42 +113,22 @@ All `core/cmd/` scripts exit `0` silently when git context can't be resolved (no
 
 ## Install
 
+**One-liner (remote):**
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh) --with-claude-code
+```
+
+**From a local clone:**
+
 ```bash
 git clone https://github.com/uplift-labs/worktree-sandbox
-cd /path/to/your/project
-bash /path/to/worktree-sandbox/install.sh
+bash worktree-sandbox/install.sh --with-claude-code
 ```
 
-This copies `core/` to `.sandbox/core/` in your project and wires a `pre-merge-commit` git hook that invokes the merge gate. To also install the Claude Code adapter:
+Installs `core/` to `.sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks. With `--with-claude-code`, the adapter goes to `.sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (via `jq` if available, otherwise printed for manual merge).
 
-```bash
-bash /path/to/worktree-sandbox/install.sh --with-claude-code
-```
-
-The adapter lands at `.sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (via `jq` if available, otherwise printed for manual merge).
-
-Re-running `install.sh` is safe (idempotent). A `post-merge` hook auto-syncs `.sandbox/` after every `git merge` so installed files stay current.
-
-## Quickstart
-
-```bash
-# From inside your project, on main
-bash .sandbox/core/cmd/sandbox-init.sh --repo "$PWD" --session demo
-# → prints: /path/to/repo/.sandbox/worktrees/sandbox-session-demo
-
-cd .sandbox/worktrees/sandbox-session-demo
-
-# Do work
-echo "hello" > feature.txt
-git add feature.txt && git commit -m "feat: add feature"
-
-# Merge back — the pre-merge-commit hook validates cleanliness
-cd /path/to/repo
-git merge sandbox-session-demo
-
-# Clean up (removes merged sandboxes, preserves dirty ones)
-bash .sandbox/core/cmd/sandbox-lifecycle.sh --repo "$PWD"
-```
+Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.sandbox/` on every merge.
 
 ## CLI reference
 

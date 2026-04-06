@@ -1,3 +1,4 @@
 # Enforce LF line endings for shell scripts on all platforms.
 # Prevents CRLF on Windows from breaking shellcheck and bash execution.
 *.sh text eol=lf
+.shellcheckrc text eol=lf
