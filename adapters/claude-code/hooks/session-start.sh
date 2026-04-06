@@ -27,16 +27,47 @@ REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 _is_msys=0
 case "$(uname -s)" in MINGW*|MSYS*) _is_msys=1 ;; esac
 
+# _resolve_parent_winpid
+# On MSYS, walk the Windows process tree from our WINPID up to find
+# claude.exe (or the closest native parent). Prints the Windows PID
+# on success, empty string on failure. Uses wmic (one-time ~400ms cost).
+_resolve_parent_winpid() {
+  local _wpid _parent _name
+  _wpid=$(cat /proc/$$/winpid 2>/dev/null) || return 0
+  [ -z "$_wpid" ] && return 0
+  local _depth
+  for _depth in 1 2 3 4 5; do
+    _parent=$(wmic process where "ProcessId=$_wpid" get ParentProcessId /format:value 2>/dev/null \
+              | tr -d '\r\n' | sed 's/.*=//') || return 0
+    [ -z "$_parent" ] && return 0
+    _name=$(wmic process where "ProcessId=$_parent" get Name /format:value 2>/dev/null \
+            | tr -d '\r\n' | sed 's/.*=//') || return 0
+    case "$_name" in
+      claude.exe|claude-code.exe|claude-desktop.exe)
+        printf '%s' "$_parent"
+        return 0
+        ;;
+    esac
+    _wpid="$_parent"
+  done
+  # Didn't find claude.exe — return the highest ancestor we reached.
+  # Better than nothing: any ancestor dying means Claude Code is gone.
+  printf '%s' "$_wpid"
+}
+
 # _launch_heartbeat <marker-path>
 # Spawns heartbeat.sh as a detached background process.
-# MSYS: ( ... & ) subshell + --pid 0 (parent PID invisible to MSYS).
+# MSYS: ( ... & ) subshell + --parent-winpid for native PID monitoring.
 # Linux/macOS: nohup + disown + --pid $PPID (standard PID monitoring).
 _launch_heartbeat() {
   local _marker="$1"
   [ -f "$_marker" ] || return 0
   if [ "$_is_msys" = 1 ]; then
+    local _winpid
+    _winpid=$(_resolve_parent_winpid)
     ( bash "$ROOT/core/lib/heartbeat.sh" \
         --pid 0 --marker "$_marker" \
+        ${_winpid:+--parent-winpid "$_winpid"} \
         </dev/null >/dev/null 2>&1 & )
   else
     nohup bash "$ROOT/core/lib/heartbeat.sh" \
