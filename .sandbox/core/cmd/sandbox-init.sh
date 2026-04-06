@@ -102,7 +102,8 @@ if ! git -C "$GIT_ROOT" worktree add "$WT_PATH" -b "$WT_BRANCH" "$BASE" >/dev/nu
   fi
 fi
 
-sb_marker_write "$MARKER" "$WT_BRANCH"
+INIT_HEAD=$(git -C "$WT_PATH" rev-parse HEAD 2>/dev/null || true)
+sb_marker_write "$MARKER" "$WT_BRANCH" "$INIT_HEAD"
 
 # Seed TASK.md template (delegated to task-md.sh — single source of truth)
 sb_task_seed_placeholder "$WT_PATH"

@@ -58,6 +58,13 @@ esac
 # Real termination path.
 [ -d "$SB" ] || exit 0
 
+# Kill heartbeat for clean shutdown (otherwise it lingers up to 1s after exit).
+if [ -f "${MARKER}.hb" ]; then
+  _hb_pid=$(cat "${MARKER}.hb" 2>/dev/null)
+  [ -n "$_hb_pid" ] && kill "$_hb_pid" 2>/dev/null || true
+  rm -f "${MARKER}.hb" 2>/dev/null || true
+fi
+
 # --- Phase 1: capture-commit pending work in the current sandbox ---------
 #
 # Guard against in-progress states where `git commit` would do something
@@ -119,7 +126,7 @@ if [ "$_can_commit" = 1 ] \
    && [ -n "$_main" ] \
    && git -C "$SB" merge-base --is-ancestor "$BRANCH" "$_main" 2>/dev/null \
    && sb_scan_uncommitted "$SB" >/dev/null 2>&1; then
-  rm -f "$MARKER" 2>/dev/null || true
+  rm -f "$MARKER" "${MARKER}.hb" 2>/dev/null || true
 fi
 
 # --- Phase 3: lifecycle reap of merged+clean sandboxes -------------------
@@ -129,4 +136,5 @@ fi
 # For sessions that kept their marker, lifecycle's live-marker protection
 # skips our branch as before.
 bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || true
+
 exit 0
