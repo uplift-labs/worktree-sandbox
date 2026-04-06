@@ -39,7 +39,8 @@ REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 [ -z "$SESSION" ] && exit 0
 
-MARKER="$REPO/.git/sandbox-markers/$SESSION"
+GIT_COMMON=$(sb_git_common_dir "$REPO") || exit 0
+MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 [ -f "$MARKER" ] || exit 0
 
 BRANCH=$(awk '{print $1}' "$MARKER")
@@ -72,14 +73,7 @@ _can_commit=1
 # Use git rev-parse --git-path so this works for linked worktrees (where
 # .git is a file pointing into the main repo's worktrees/<name> dir, and
 # MERGE_HEAD etc. live in that pointed-to dir, not in $SB/.git/).
-_merge_head=$(git -C "$SB" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)
-_rebase_head=$(git -C "$SB" rev-parse --git-path REBASE_HEAD 2>/dev/null || true)
-_rebase_apply=$(git -C "$SB" rev-parse --git-path rebase-apply 2>/dev/null || true)
-_rebase_merge=$(git -C "$SB" rev-parse --git-path rebase-merge 2>/dev/null || true)
-if { [ -n "$_merge_head" ] && [ -f "$_merge_head" ]; } \
-   || { [ -n "$_rebase_head" ] && [ -f "$_rebase_head" ]; } \
-   || { [ -n "$_rebase_apply" ] && [ -d "$_rebase_apply" ]; } \
-   || { [ -n "$_rebase_merge" ] && [ -d "$_rebase_merge" ]; }; then
+if sb_has_in_progress_operation "$SB"; then
   _can_commit=0
   printf '[sandbox] SessionEnd: in-progress merge/rebase in %s — skipping capture-commit.\n' "$BRANCH" >&2
 fi

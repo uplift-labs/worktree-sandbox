@@ -104,6 +104,27 @@ _sb_hb_is_session_alive() {
   return 0  # within grace — protected
 }
 
+# _sb_kill_dead_heartbeat <marker_path>
+# Check heartbeat sidecar for a marker and kill zombie heartbeats.
+# Returns: 0 = session alive (caller should skip),
+#          1 = no heartbeat file,
+#          2 = heartbeat existed but session is confirmed dead.
+_sb_kill_dead_heartbeat() {
+  local mf="$1"
+  [ -f "${mf}.hb" ] || return 1
+  local _hb_pid
+  _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
+  if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
+    if _sb_hb_is_session_alive "${mf}.hb" "$mf"; then
+      return 0  # session genuinely alive
+    fi
+    kill "$_hb_pid" 2>/dev/null || true
+    rm -f "${mf}.hb" 2>/dev/null || true
+  fi
+  # .hb with dead PID is left for later phases; caller deletes with marker.
+  return 2  # heartbeat existed, session confirmed dead
+}
+
 REPO=""; TTL=5; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -118,11 +139,7 @@ done
 [ -z "$REPO" ] && usage
 
 GIT_ROOT=$(sb_git_root "$REPO") || exit 0
-GIT_COMMON=$(git -C "$GIT_ROOT" rev-parse --git-common-dir 2>/dev/null)
-case "$GIT_COMMON" in
-  /*|[A-Za-z]:*) ;;
-  *) GIT_COMMON="$GIT_ROOT/$GIT_COMMON" ;;
-esac
+GIT_COMMON=$(sb_git_common_dir "$GIT_ROOT") || exit 0
 MAIN_BRANCH=$(sb_main_branch "$GIT_ROOT")
 MARKERS_DIR="$GIT_COMMON/sandbox-markers"
 
@@ -158,20 +175,8 @@ if [ -d "$MARKERS_DIR" ]; then
       fi
     fi
 
-    # If heartbeat sidecar exists and its PID is alive, verify the parent
-    # Claude Code process is also alive before trusting the heartbeat.
-    if [ -f "${mf}.hb" ]; then
-      _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
-      if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
-        if _sb_hb_is_session_alive "${mf}.hb" "$mf"; then
-          continue  # session genuinely alive — skip
-        fi
-        # Parent dead or orphan grace expired — kill the zombie heartbeat.
-        kill "$_hb_pid" 2>/dev/null || true
-        rm -f "${mf}.hb" 2>/dev/null || true
-        # Fall through to TTL check below.
-      fi
-    fi
+    # If heartbeat sidecar exists, verify whether session is truly alive.
+    _sb_kill_dead_heartbeat "$mf" && continue
 
     # Grace period: marker created < 30s ago — heartbeat may not have started yet.
     _created=$(sb_marker_read_epoch "$mf")
@@ -228,23 +233,9 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     [ -f "$mf" ] || continue
     [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
 
-    # If heartbeat sidecar exists and its PID is alive, verify parent.
-    _hb_confirmed_dead=false
-    if [ -f "${mf}.hb" ]; then
-      _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
-      if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
-        if _sb_hb_is_session_alive "${mf}.hb" "$mf"; then
-          continue  # session genuinely alive — skip
-        fi
-        # Parent dead or orphan grace expired — kill the zombie heartbeat.
-        kill "$_hb_pid" 2>/dev/null || true
-        rm -f "${mf}.hb" 2>/dev/null || true
-        _hb_confirmed_dead=true
-      else
-        # .hb exists but PID is dead — session is confirmed dead.
-        _hb_confirmed_dead=true
-      fi
-    fi
+    # If heartbeat sidecar exists, verify whether session is truly alive.
+    _sb_kill_dead_heartbeat "$mf"; _hb_rc=$?
+    [ "$_hb_rc" -eq 0 ] && continue  # session genuinely alive — skip
 
     _branch=$(sb_marker_read_value "$mf")
     [ -z "$_branch" ] && continue
@@ -264,20 +255,11 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     # doing any work (e.g. after /clear + terminal close).
     _cur_head=$(git -C "$_sb" rev-parse HEAD 2>/dev/null || true)
     if [ "$_cur_head" = "$_init_head" ]; then
-      "$_hb_confirmed_dead" || continue
+      [ "$_hb_rc" -eq 2 ] || continue
     fi
 
     # In-progress state guards (see session-end.sh Phase 2 rationale).
-    _mh=$(git -C "$_sb" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)
-    _rh=$(git -C "$_sb" rev-parse --git-path REBASE_HEAD 2>/dev/null || true)
-    _ra=$(git -C "$_sb" rev-parse --git-path rebase-apply 2>/dev/null || true)
-    _rm=$(git -C "$_sb" rev-parse --git-path rebase-merge 2>/dev/null || true)
-    if { [ -n "$_mh" ] && [ -f "$_mh" ]; } \
-       || { [ -n "$_rh" ] && [ -f "$_rh" ]; } \
-       || { [ -n "$_ra" ] && [ -d "$_ra" ]; } \
-       || { [ -n "$_rm" ] && [ -d "$_rm" ]; }; then
-      continue
-    fi
+    sb_has_in_progress_operation "$_sb" && continue
     git -C "$_sb" symbolic-ref -q HEAD >/dev/null 2>&1 || continue
 
     # Merged into main AND clean AND session did real work → marker is no

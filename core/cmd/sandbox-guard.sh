@@ -64,11 +64,7 @@ if [ -z "$REPO" ]; then
 fi
 REPO_ROOT=$(sb_git_root "$REPO") || exit 0
 
-GIT_COMMON=$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null)
-case "$GIT_COMMON" in
-  /*|[A-Za-z]:*) ;;
-  *) GIT_COMMON="$REPO_ROOT/$GIT_COMMON" ;;
-esac
+GIT_COMMON=$(sb_git_common_dir "$REPO_ROOT") || exit 0
 
 MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 [ -f "$MARKER" ] || exit 0  # no active sandbox → no restriction
