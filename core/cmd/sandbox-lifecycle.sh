@@ -180,6 +180,7 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
 
     # If heartbeat sidecar exists and its PID is alive, verify parent.
+    _hb_confirmed_dead=false
     if [ -f "${mf}.hb" ]; then
       _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
       if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
@@ -189,7 +190,10 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
         # Parent dead or orphan grace expired — kill the zombie heartbeat.
         kill "$_hb_pid" 2>/dev/null || true
         rm -f "${mf}.hb" 2>/dev/null || true
-        # Fall through to merged+clean check below.
+        _hb_confirmed_dead=true
+      else
+        # .hb exists but PID is dead — session is confirmed dead.
+        _hb_confirmed_dead=true
       fi
     fi
 
@@ -206,8 +210,13 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     # Session never committed anything — branch HEAD still equals the HEAD
     # at marker creation time. This is a live session that hasn't started
     # work yet; the marker is still load-bearing.
+    # Exception: if the heartbeat confirmed the session is dead, allow
+    # cleanup even when HEAD hasn't changed — the session died before
+    # doing any work (e.g. after /clear + terminal close).
     _cur_head=$(git -C "$_sb" rev-parse HEAD 2>/dev/null || true)
-    [ "$_cur_head" = "$_init_head" ] && continue
+    if [ "$_cur_head" = "$_init_head" ]; then
+      "$_hb_confirmed_dead" || continue
+    fi
 
     # In-progress state guards (see session-end.sh Phase 2 rationale).
     _mh=$(git -C "$_sb" rev-parse --git-path MERGE_HEAD 2>/dev/null || true)

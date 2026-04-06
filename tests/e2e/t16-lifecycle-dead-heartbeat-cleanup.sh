@@ -51,8 +51,11 @@ assert_file_absent "marker cleaned (dead heartbeat)" "$MARKER1"
 assert_file_absent "sidecar cleaned" "${MARKER1}.hb"
 assert_dir_absent "worktree removed" "$SB1"
 
-# ── 2. Dead heartbeat but within grace period → survives ─────────────
-echo "== dead heartbeat within grace period → survives =="
+# ── 2. Dead heartbeat + no commits + fresh marker → still cleaned ────
+# A dead heartbeat means the session is confirmed dead. Even if the marker
+# is fresh and HEAD hasn't changed, Phase 3 should clean up because the
+# branch is trivially an ancestor of main and the worktree is clean.
+echo "== dead heartbeat + no commits + fresh marker → cleaned =="
 
 SESSION2="t16-grace"
 SB2=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION2")
@@ -63,8 +66,8 @@ assert_file_exists "fresh marker created" "$MARKER2"
 printf '99998 0 0' > "${MARKER2}.hb"
 
 bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
-assert_file_exists "marker survives (grace period)" "$MARKER2"
-assert_dir_exists "worktree survives (grace period)" "$SB2"
+assert_file_absent "marker cleaned (dead heartbeat, no work)" "$MARKER2"
+assert_dir_absent "worktree cleaned (dead heartbeat, no work)" "$SB2"
 
 # ── 3. No sidecar at all + stale → TTL reclaim works ─────────────────
 echo "== no sidecar + stale → TTL reclaims =="
@@ -89,7 +92,7 @@ out3=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 2>&1)
 assert_file_absent "marker cleaned (no sidecar + stale)" "$MARKER3"
 assert_dir_absent "worktree removed (no sidecar)" "$SB3"
 
-# Cleanup case 2 marker
+# Cleanup case 2 residuals (marker+sidecar already removed by lifecycle)
 rm -f "$MARKER2" "${MARKER2}.hb" 2>/dev/null || true
 
 # ── 4. Live heartbeat + dead parent winpid → lifecycle kills + reclaims ──
