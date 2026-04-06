@@ -23,6 +23,29 @@ REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
 [ -z "$SESSION" ] && exit 0
 
+# Detect MSYS/Windows — nohup+disown is broken there; use subshell pattern.
+_is_msys=0
+case "$(uname -s)" in MINGW*|MSYS*) _is_msys=1 ;; esac
+
+# _launch_heartbeat <marker-path>
+# Spawns heartbeat.sh as a detached background process.
+# MSYS: ( ... & ) subshell + --pid 0 (parent PID invisible to MSYS).
+# Linux/macOS: nohup + disown + --pid $PPID (standard PID monitoring).
+_launch_heartbeat() {
+  local _marker="$1"
+  [ -f "$_marker" ] || return 0
+  if [ "$_is_msys" = 1 ]; then
+    ( bash "$ROOT/core/lib/heartbeat.sh" \
+        --pid 0 --marker "$_marker" \
+        </dev/null >/dev/null 2>&1 & )
+  else
+    nohup bash "$ROOT/core/lib/heartbeat.sh" \
+      --pid "$PPID" --marker "$_marker" \
+      </dev/null >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  fi
+}
+
 # Suppress creation on compact restart — just re-emit the banner for existing sandbox
 if [ "$SOURCE" = "compact" ]; then
   MARKERS_DIR="$REPO/.git/sandbox-markers"
@@ -31,11 +54,7 @@ if [ "$SOURCE" = "compact" ]; then
     if [ -n "$BR" ] && [ -d "$REPO/.sandbox/worktrees/$BR" ]; then
       printf '[sandbox] Sandbox (re-injected): %s/.sandbox/worktrees/%s — use this root for all file ops.\n' "$REPO" "$BR"
       # Re-launch heartbeat — previous one died with the old process.
-      _MARKER="$MARKERS_DIR/$SESSION"
-      nohup bash "$ROOT/core/lib/heartbeat.sh" \
-        --pid "$PPID" --marker "$_MARKER" \
-        </dev/null >/dev/null 2>&1 &
-      disown 2>/dev/null || true
+      _launch_heartbeat "$MARKERS_DIR/$SESSION"
     fi
   fi
   exit 0
@@ -49,13 +68,7 @@ LC_OUT=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" 2>/dev/null |
 if SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION" 2>&1) && [ -n "$SB" ]; then
   printf '[sandbox] Sandbox: %s — use this root for all file ops.\n' "$SB"
 
-  # Launch heartbeat — keeps marker fresh while Claude Code ($PPID) is alive.
-  _MARKER="$REPO/.git/sandbox-markers/$SESSION"
-  if [ -f "$_MARKER" ]; then
-    nohup bash "$ROOT/core/lib/heartbeat.sh" \
-      --pid "$PPID" --marker "$_MARKER" \
-      </dev/null >/dev/null 2>&1 &
-    disown 2>/dev/null || true
-  fi
+  # Launch heartbeat — keeps marker fresh while Claude Code is alive.
+  _launch_heartbeat "$REPO/.git/sandbox-markers/$SESSION"
 fi
 exit 0

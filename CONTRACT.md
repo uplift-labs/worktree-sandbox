@@ -128,6 +128,13 @@ delete such branches manually or rely on the orphan-branch sweep if the
 branch name matches the sandbox prefix and the original commits are in
 `main`.
 
+## Git hooks installed by `install.sh`
+
+| Hook               | Purpose                                                        |
+|--------------------|----------------------------------------------------------------|
+| `pre-merge-commit` | Gates sandbox merges via `sandbox-merge-gate` — validates TASK.md completion and worktree cleanliness of the branch being merged. |
+| `post-merge`       | Re-runs `install.sh` after every merge so `.sandbox/` stays in sync with source. Runs in background; fail-open. Auto-detects `--with-claude-code` if adapter is already installed. |
+
 ## Library functions
 
 Source files under `core/lib/` are not part of the public contract. They are
