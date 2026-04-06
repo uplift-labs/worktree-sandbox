@@ -57,6 +57,8 @@ _resolve_parent_winpid() {
 
 # _launch_heartbeat <marker-path>
 # Spawns heartbeat.sh as a detached background process.
+# Passes --repo and --sandbox-root so the heartbeat can invoke
+# sandbox-cleanup.sh on parent death for immediate cleanup.
 # MSYS: ( ... & ) subshell + --parent-winpid for native PID monitoring.
 # Linux/macOS: nohup + disown + --pid $PPID (standard PID monitoring).
 _launch_heartbeat() {
@@ -67,11 +69,13 @@ _launch_heartbeat() {
     _winpid=$(_resolve_parent_winpid)
     ( bash "$ROOT/core/lib/heartbeat.sh" \
         --pid 0 --marker "$_marker" \
+        --repo "$REPO" --sandbox-root "$ROOT" \
         ${_winpid:+--parent-winpid "$_winpid"} \
         </dev/null >/dev/null 2>&1 & )
   else
     nohup bash "$ROOT/core/lib/heartbeat.sh" \
       --pid "$PPID" --marker "$_marker" \
+      --repo "$REPO" --sandbox-root "$ROOT" \
       </dev/null >/dev/null 2>&1 &
     disown 2>/dev/null || true
   fi
