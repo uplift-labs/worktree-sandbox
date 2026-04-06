@@ -39,6 +39,13 @@ usage() { printf 'usage: sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--
 # failed at launch time AND SessionEnd never fired (crash/force-close).
 ORPHAN_HB_GRACE=7200  # 2 hours
 
+# Extended TTL for markers whose session never committed (HEAD == init_head).
+# These sessions look indistinguishable from merged+clean dead sessions, so
+# the standard short TTL would reap them immediately. A longer TTL protects
+# live sessions whose heartbeat died (e.g., parent PID resolution raced on
+# MSYS) while still cleaning genuinely dead empty sessions after this period.
+FRESH_SESSION_TTL=300  # 5 minutes
+
 # _sb_hb_is_session_alive <sidecar_path> <marker_path>
 # Checks whether a heartbeat with a live PID is protecting a truly active
 # session. Returns 0 (session alive / protected) or 1 (orphan — safe to kill).
@@ -173,8 +180,23 @@ if [ -d "$MARKERS_DIR" ]; then
       continue
     fi
 
-    # Standard TTL check on mtime.
-    if ! sb_marker_is_fresh "$mf" "$TTL"; then
+    # Fresh-session protection: if HEAD == init_head (session never committed),
+    # the worktree looks indistinguishable from a merged+clean dead session.
+    # Use ORPHAN_HB_GRACE instead of the short TTL — the session might still be
+    # active with a dead heartbeat (e.g., parent PID resolution raced on MSYS).
+    _effective_ttl="$TTL"
+    if [ -n "$_m_branch" ]; then
+      _init_head=$(sb_marker_read_initial_head "$mf")
+      if [ -n "$_init_head" ] && [ -d "$_m_wt" ]; then
+        _cur_head=$(git -C "$_m_wt" rev-parse HEAD 2>/dev/null || true)
+        if [ "$_cur_head" = "$_init_head" ]; then
+          _effective_ttl="$FRESH_SESSION_TTL"
+        fi
+      fi
+    fi
+
+    # Standard TTL check on mtime (uses extended TTL for fresh sessions).
+    if ! sb_marker_is_fresh "$mf" "$_effective_ttl"; then
       rm -f "$mf" "${mf}.hb" 2>/dev/null || true
     fi
   done
