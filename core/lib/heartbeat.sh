@@ -29,9 +29,14 @@
 #                      [--parent-winpid <windows-pid>]
 #
 # Sidecar file:
-#   Writes its own PID to "${MARKER}.hb" on startup, removes it on exit.
-#   This lets session-end.sh kill the heartbeat explicitly for a clean shutdown,
-#   and lets lifecycle verify whether a heartbeat process is still alive.
+#   Writes "<heartbeat_pid> <parent_winpid|0> <monitored_pid|0>" to
+#   "${MARKER}.hb" on startup, removes it on exit.  Field layout:
+#     $1 = heartbeat PID (used by session-end.sh to kill on clean shutdown)
+#     $2 = Windows PID of parent claude.exe (0 if not on MSYS or unresolved)
+#     $3 = Unix PID being monitored via kill -0 (0 in marker-only mode)
+#   Lifecycle uses fields 2-3 to independently verify whether the owning
+#   Claude Code process is still alive, rather than trusting the heartbeat
+#   process alone.
 #
 # Exit conditions (all graceful):
 #   - Target PID dies (kill -0 fails) — PID mode only
@@ -80,7 +85,7 @@ _hb_sidecar="${MARKER}.hb"
 cleanup() { rm -f "$_hb_sidecar" 2>/dev/null; }
 trap cleanup EXIT
 
-printf '%s' "$$" > "$_hb_sidecar" 2>/dev/null || exit 1
+printf '%s %s %s' "$$" "${PARENT_WINPID:-0}" "${PID:-0}" > "$_hb_sidecar" 2>/dev/null || exit 1
 
 _start=$(date +%s)
 _tick=0

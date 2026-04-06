@@ -60,7 +60,7 @@ esac
 
 # Kill heartbeat for clean shutdown (otherwise it lingers up to 1s after exit).
 if [ -f "${MARKER}.hb" ]; then
-  _hb_pid=$(cat "${MARKER}.hb" 2>/dev/null)
+  _hb_pid=$(awk '{print $1}' "${MARKER}.hb" 2>/dev/null)
   [ -n "$_hb_pid" ] && kill "$_hb_pid" 2>/dev/null || true
   rm -f "${MARKER}.hb" 2>/dev/null || true
 fi

@@ -39,7 +39,7 @@ assert_eq "mtime refreshed" "1" "$([ "$NEW_MTIME" -gt "$OLD_MTIME" ] && echo 1 |
 
 # Sidecar exists with heartbeat PID
 assert_file_exists "sidecar created" "${M1}.hb"
-SIDECAR_PID=$(cat "${M1}.hb" 2>/dev/null)
+SIDECAR_PID=$(awk '{print $1}' "${M1}.hb" 2>/dev/null)
 assert_eq "sidecar contains HB PID" "$HB_PID" "$SIDECAR_PID"
 
 kill "$TARGET_PID" 2>/dev/null; wait "$TARGET_PID" 2>/dev/null || true

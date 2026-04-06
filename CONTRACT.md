@@ -18,12 +18,21 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
   v0.x — absent in legacy markers). The initial HEAD lets lifecycle Phase 3
   distinguish "session never committed" from "session committed and merged"
   when both leave branch == main. Markers are auto-expired via TTL.
-- **Heartbeat sidecar:** `<marker-path>.hb`. Contains the PID of the
-  background heartbeat process. The heartbeat touches the marker every 1s
-  while the owning process (Claude Code) is alive; when the PID dies, the
-  heartbeat exits and the marker's mtime freezes. Lifecycle Phases 2 and 3
-  check the sidecar PID before reclaiming a marker — a live heartbeat PID
-  means the session is active regardless of TTL.
+- **Heartbeat sidecar:** `<marker-path>.hb`. Format:
+  `<heartbeat_pid> <parent_winpid|0> <monitored_pid|0>`. Field 1 is the
+  heartbeat process PID (used by session-end.sh to kill on clean shutdown).
+  Field 2 is the Windows PID of the parent Claude Code process (resolved
+  via wmic at launch); `0` on Linux/macOS or when wmic resolution failed on
+  MSYS. Field 3 is the Unix PID being monitored via `kill -0` (the `--pid`
+  argument, typically `$PPID`); `0` in marker-only mode. The heartbeat
+  touches the marker every 1s while the owning process is alive; when the
+  PID dies, the heartbeat exits and the marker's mtime freezes. Lifecycle
+  Phases 2 and 3 verify the owning process independently: field 3 > 0 →
+  `kill -0`; else field 2 > 0 → `tasklist` check; else both 0 (marker-only
+  mode, no external monitoring) → orphan grace period (default 2h from
+  marker creation), after which the heartbeat is killed as a presumed
+  orphan. Legacy single-field `.hb` files (missing fields 2-3) are treated
+  as unknown-parent and fall through to the orphan grace path.
 - **Worktree location:** `<repo-root>/.sandbox/worktrees/<branch-name>`.
 
 ## Commands

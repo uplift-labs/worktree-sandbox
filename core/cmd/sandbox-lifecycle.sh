@@ -33,6 +33,60 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 
 usage() { printf 'usage: sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]\n' >&2; exit 2; }
 
+# Grace period for heartbeats with unknown parent (winpid=0 or absent).
+# After this many seconds from marker creation, lifecycle kills the heartbeat
+# and proceeds with TTL reclaim. Covers the case where _resolve_parent_winpid
+# failed at launch time AND SessionEnd never fired (crash/force-close).
+ORPHAN_HB_GRACE=7200  # 2 hours
+
+# _sb_hb_is_session_alive <sidecar_path> <marker_path>
+# Checks whether a heartbeat with a live PID is protecting a truly active
+# session. Returns 0 (session alive / protected) or 1 (orphan — safe to kill).
+#
+# Decision matrix:
+#   parent_winpid known + parent alive → 0 (protected)
+#   parent_winpid known + parent dead  → 1 (orphan: kill heartbeat)
+#   parent_winpid unknown (0/absent)   → 0 if within ORPHAN_HB_GRACE,
+#                                        1 if grace expired
+_sb_hb_is_session_alive() {
+  local _hb_path="$1" _marker_path="$2"
+  local _content _parent_wp _monitored_pid
+  _content=$(cat "$_hb_path" 2>/dev/null) || return 0
+  _parent_wp=$(printf '%s' "$_content" | awk '{print $2}')
+  _monitored_pid=$(printf '%s' "$_content" | awk '{print $3}')
+
+  # Field 3: Unix PID monitored via kill -0 (Linux/macOS --pid $PPID mode).
+  # If present and > 0, directly verify whether the parent process is alive.
+  if [ -n "$_monitored_pid" ] && [ "$_monitored_pid" != "0" ]; then
+    if kill -0 "$_monitored_pid" 2>/dev/null; then
+      return 0  # monitored parent alive
+    fi
+    return 1  # monitored parent dead
+  fi
+
+  # Field 2: Windows PID of parent claude.exe (MSYS --parent-winpid mode).
+  if [ -n "$_parent_wp" ] && [ "$_parent_wp" != "0" ]; then
+    # On non-Windows, tasklist is absent → can't verify → assume alive.
+    if ! command -v tasklist >/dev/null 2>&1; then
+      return 0
+    fi
+    if tasklist /FI "PID eq $_parent_wp" /NH 2>/dev/null | grep -q "$_parent_wp"; then
+      return 0  # parent alive
+    fi
+    return 1  # parent confirmed dead
+  fi
+
+  # Neither monitored PID nor parent winpid — marker-only mode with no
+  # external monitoring. Apply orphan grace period from marker creation epoch.
+  local _created _now
+  _created=$(sb_marker_read_epoch "$_marker_path")
+  _now=$(date +%s)
+  if [ -n "$_created" ] && [ $((_now - _created)) -ge "$ORPHAN_HB_GRACE" ]; then
+    return 1  # grace expired — treat as orphan
+  fi
+  return 0  # within grace — protected
+}
+
 REPO=""; TTL=5; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,11 +124,18 @@ if [ -d "$MARKERS_DIR" ]; then
     [ -f "$mf" ] || continue
     [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
 
-    # If heartbeat sidecar exists and its PID is alive, session is live — skip.
+    # If heartbeat sidecar exists and its PID is alive, verify the parent
+    # Claude Code process is also alive before trusting the heartbeat.
     if [ -f "${mf}.hb" ]; then
-      _hb_pid=$(cat "${mf}.hb" 2>/dev/null)
+      _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
       if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
-        continue
+        if _sb_hb_is_session_alive "${mf}.hb" "$mf"; then
+          continue  # session genuinely alive — skip
+        fi
+        # Parent dead or orphan grace expired — kill the zombie heartbeat.
+        kill "$_hb_pid" 2>/dev/null || true
+        rm -f "${mf}.hb" 2>/dev/null || true
+        # Fall through to TTL check below.
       fi
     fi
 
@@ -118,11 +179,17 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     [ -f "$mf" ] || continue
     [[ "$(basename "$mf")" == *.hb ]] && continue   # skip heartbeat sidecar files
 
-    # If heartbeat sidecar exists and its PID is alive, session is live — skip.
+    # If heartbeat sidecar exists and its PID is alive, verify parent.
     if [ -f "${mf}.hb" ]; then
-      _hb_pid=$(cat "${mf}.hb" 2>/dev/null)
+      _hb_pid=$(awk '{print $1}' "${mf}.hb" 2>/dev/null)
       if [ -n "$_hb_pid" ] && kill -0 "$_hb_pid" 2>/dev/null; then
-        continue
+        if _sb_hb_is_session_alive "${mf}.hb" "$mf"; then
+          continue  # session genuinely alive — skip
+        fi
+        # Parent dead or orphan grace expired — kill the zombie heartbeat.
+        kill "$_hb_pid" 2>/dev/null || true
+        rm -f "${mf}.hb" 2>/dev/null || true
+        # Fall through to merged+clean check below.
       fi
     fi
 

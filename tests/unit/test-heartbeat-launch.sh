@@ -30,7 +30,7 @@ printf 'branch-sub %s abc123' "$(date +%s)" > "$M1"
 sleep 2
 
 assert_file_exists "subshell: sidecar created" "${M1}.hb"
-_sub_pid=$(cat "${M1}.hb" 2>/dev/null)
+_sub_pid=$(awk '{print $1}' "${M1}.hb" 2>/dev/null)
 if [ -n "$_sub_pid" ] && kill -0 "$_sub_pid" 2>/dev/null; then
   _sub_alive=1
 else
@@ -62,7 +62,7 @@ else
   sleep 2
 
   assert_file_exists "nohup: sidecar created" "${M2}.hb"
-  _noh_sidecar=$(cat "${M2}.hb" 2>/dev/null)
+  _noh_sidecar=$(awk '{print $1}' "${M2}.hb" 2>/dev/null)
   if [ -n "$_noh_sidecar" ] && kill -0 "$_noh_sidecar" 2>/dev/null; then
     _noh_alive=1
   else
