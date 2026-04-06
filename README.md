@@ -9,7 +9,7 @@ Git worktree isolation and automatic cleanup for AI-assisted development session
 Install into your project with Claude Code
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh) --with-claude-code
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.0.0/remote-install.sh) --with-claude-code
 ```
 
 That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
@@ -108,7 +108,7 @@ All `core/cmd/` scripts exit `0` silently when git context can't be resolved (no
 **One-liner (remote):**
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh) --with-claude-code
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.0.0/remote-install.sh) --with-claude-code
 ```
 
 **From a local clone:**
