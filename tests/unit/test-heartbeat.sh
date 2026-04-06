@@ -118,6 +118,35 @@ assert_file_absent "sidecar cleaned after SIGTERM" "${M4}.hb"
 
 kill "$SIG_PID" 2>/dev/null; wait "$SIG_PID" 2>/dev/null || true
 
+# ── 4b. SIGHUP triggers parent-death path (not sidecar deletion) ───
+# When a terminal closes, SIGHUP is delivered. The heartbeat must treat
+# this as parent death: leave the sidecar behind (dead-PID signal for
+# lifecycle) instead of deleting it like SIGTERM does.
+echo "== SIGHUP triggers parent-death path =="
+M4B="$MARKERS/sighup.marker"
+printf 'branch-hup %s abcdef' "$(date +%s)" > "$M4B"
+
+sleep 300 &
+HUP_TARGET=$!
+
+bash "$HB" --pid "$HUP_TARGET" --marker "$M4B" --interval 1 &
+HB4B_PID=$!
+sleep 2
+
+assert_file_exists "sidecar exists before SIGHUP" "${M4B}.hb"
+
+# Send HUP to heartbeat — simulates terminal close
+kill -HUP "$HB4B_PID" 2>/dev/null; wait "$HB4B_PID" 2>/dev/null || true
+sleep 1
+
+# SIGHUP = parent death → sidecar must be LEFT BEHIND (not deleted).
+# This is the opposite of SIGTERM (test 4 above) which cleans up the sidecar.
+assert_file_exists "sidecar left behind after SIGHUP (parent-death signal)" "${M4B}.hb"
+
+# Cleanup
+rm -f "$M4B" "${M4B}.hb"
+kill "$HUP_TARGET" 2>/dev/null; wait "$HUP_TARGET" 2>/dev/null || true
+
 # ── 5. Marker-only mode (--pid 0) ──────────────────────────────────
 echo "== marker-only mode (--pid 0) =="
 M5="$MARKERS/marker-only.marker"

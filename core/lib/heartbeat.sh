@@ -105,6 +105,11 @@ cleanup() {
   rm -f "$_hb_sidecar" 2>/dev/null
 }
 trap cleanup EXIT
+# SIGHUP arrives when the terminal closes. Treat it as parent death so we
+# run cleanup instead of just deleting the sidecar and exiting silently.
+# On MSYS nohup is not used (broken), so this is the primary defence.
+# The flag is picked up at the top of the next loop iteration.
+trap '_parent_died=1' HUP
 
 printf '%s %s %s' "$$" "${PARENT_WINPID:-0}" "${PID:-0}" > "$_hb_sidecar" 2>/dev/null || exit 1
 
@@ -112,6 +117,9 @@ _start=$(date +%s)
 _tick=0
 
 while true; do
+  # SIGHUP received — terminal closed, parent is dead.
+  [ "$_parent_died" = 1 ] && break
+
   # Marker gone — someone cleaned up, nothing left to heartbeat.
   [ -f "$MARKER" ] || break
 
