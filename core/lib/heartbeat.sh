@@ -30,7 +30,9 @@
 #
 # Sidecar file:
 #   Writes "<heartbeat_pid> <parent_winpid|0> <monitored_pid|0>" to
-#   "${MARKER}.hb" on startup, removes it on exit.  Field layout:
+#   "${MARKER}.hb" on startup.  On parent-death exit the sidecar is LEFT
+#   behind (dead PID serves as a signal for lifecycle Phase 3); on signal
+#   exit or marker-gone exit the sidecar is removed.  Field layout:
 #     $1 = heartbeat PID (used by session-end.sh to kill on clean shutdown)
 #     $2 = Windows PID of parent claude.exe (0 if not on MSYS or unresolved)
 #     $3 = Unix PID being monitored via kill -0 (0 in marker-only mode)
@@ -79,10 +81,20 @@ if [ -n "$PARENT_WINPID" ] && [ "$PARENT_WINPID" != "0" ]; then
   _check_winpid=1
 fi
 
-# Write sidecar with our PID; clean it up on any exit.
+# Write sidecar with our PID.
+# On parent-death exit the sidecar is deliberately LEFT behind so that
+# lifecycle can read the dead PID and confirm the session is dead
+# (_hb_confirmed_dead=true in Phase 3).  On signal exit (session-end.sh
+# sends kill) or marker-gone exit, the sidecar is removed as before.
 _hb_sidecar="${MARKER}.hb"
+_parent_died=0
 # shellcheck disable=SC2329  # invoked indirectly via trap
-cleanup() { rm -f "$_hb_sidecar" 2>/dev/null; }
+cleanup() {
+  if [ "$_parent_died" = 1 ]; then
+    return  # leave sidecar — dead PID is the signal for lifecycle
+  fi
+  rm -f "$_hb_sidecar" 2>/dev/null
+}
 trap cleanup EXIT
 
 printf '%s %s %s' "$$" "${PARENT_WINPID:-0}" "${PID:-0}" > "$_hb_sidecar" 2>/dev/null || exit 1
@@ -96,14 +108,16 @@ while true; do
 
   # PID mode: target PID dead — stop heartbeating so mtime freezes.
   if [ "$_check_pid" = 1 ]; then
-    kill -0 "$PID" 2>/dev/null || break
+    if ! kill -0 "$PID" 2>/dev/null; then
+      _parent_died=1; break
+    fi
   fi
 
   # MSYS Windows PID mode: check native parent every WINPID_CHECK_EVERY ticks.
   if [ "$_check_winpid" = 1 ] && [ $((_tick % WINPID_CHECK_EVERY)) -eq 0 ]; then
     if ! wmic process where "ProcessId=$PARENT_WINPID" get ProcessId /format:value 2>/dev/null \
          | grep -q "ProcessId"; then
-      break
+      _parent_died=1; break
     fi
   fi
 

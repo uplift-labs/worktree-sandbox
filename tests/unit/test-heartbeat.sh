@@ -67,7 +67,7 @@ else
   _hb_alive=0
 fi
 assert_eq "heartbeat exited after PID death" "0" "$_hb_alive"
-assert_file_absent "sidecar cleaned up after PID death" "${M2}.hb"
+assert_file_exists "sidecar left behind after PID death (dead-PID signal)" "${M2}.hb"
 
 # ── 3. Heartbeat exits when marker deleted ──────────────────────────
 echo "== heartbeat exits when marker deleted =="

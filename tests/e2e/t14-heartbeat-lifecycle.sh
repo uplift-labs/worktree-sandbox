@@ -60,7 +60,7 @@ sleep 3
 if kill -0 "$HB_PID" 2>/dev/null; then
   kill "$HB_PID" 2>/dev/null; wait "$HB_PID" 2>/dev/null || true
 fi
-assert_file_absent "sidecar cleaned after PID death" "${MARKER}.hb"
+assert_file_exists "sidecar left behind after PID death (dead-PID signal)" "${MARKER}.hb"
 
 # Backdate marker mtime to simulate time passing after heartbeat stopped
 touch -t "$(date -d '-1 minute' '+%Y%m%d%H%M.%S' 2>/dev/null || date -v-1M '+%Y%m%d%H%M.%S')" "$MARKER"
