@@ -16,8 +16,9 @@
 # in sandbox-lifecycle.sh (next SessionStart) to reclaim later.
 #
 # Reason branching:
-#   clear   — /clear, context reset; session continues. Heartbeat only.
-#   compact — compact restart; session continues. Heartbeat only.
+#   compact — compact restart; same session_id reused. Heartbeat only.
+#   clear   — /clear creates a new session_id; old session is dead.
+#             Kill heartbeat + delegate cleanup (same as real termination).
 #   other   — real termination. Kill heartbeat + delegate cleanup.
 
 set -u
@@ -40,10 +41,11 @@ GIT_COMMON=$(sb_git_common_dir "$REPO") || exit 0
 MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 [ -f "$MARKER" ] || exit 0
 
-# Non-terminating reasons: session is not actually ending — just heartbeat
-# the marker and bail. No commit, no scan.
+# Compact: session continues with the same session_id — just heartbeat
+# the marker and bail. SessionStart with source=compact will re-launch
+# the heartbeat for the surviving sandbox.
 case "$REASON" in
-  clear|compact)
+  compact)
     touch "$MARKER" 2>/dev/null
     exit 0
     ;;

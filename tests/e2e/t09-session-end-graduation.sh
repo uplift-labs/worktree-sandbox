@@ -2,7 +2,9 @@
 # t09 — SessionEnd durability + housekeeping (commit-only, no auto-merge).
 # Covers:
 #   - Multiple Stop turns with a clean sandbox keep the sandbox alive.
-#   - SessionEnd reason=clear / compact are heartbeat-only.
+#   - SessionEnd reason=clear runs cleanup (preserves unmerged sandbox).
+#   - SessionEnd reason=clear on empty session self-reaps.
+#   - SessionEnd reason=compact is heartbeat-only.
 #   - SessionEnd reason=prompt_input_exit captures pending work as a commit
 #     on the sandbox branch, WITHOUT merging into main.
 #   - SessionEnd skips commit when the tree is already clean.
@@ -48,13 +50,30 @@ for turn in 1 2 3; do
   assert_file_absent "main untouched after turn $turn" "$REPO/feature.txt"
 done
 
-echo "== SessionEnd reason=clear is heartbeat-only =="
+echo "== SessionEnd reason=clear runs cleanup, preserves unmerged sandbox =="
 CLEAR_IN=$(printf '{"session_id":"%s","reason":"clear"}' "$SESSION")
 TIP_BEFORE=$(git -C "$SB_PATH" rev-parse HEAD)
 printf '%s' "$CLEAR_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
 assert_eq "no commit created on clear" "$TIP_BEFORE" "$(git -C "$SB_PATH" rev-parse HEAD)"
 assert_dir_exists "sandbox preserved on clear" "$SB_PATH"
 assert_file_absent "main untouched on clear" "$REPO/feature.txt"
+
+echo "== SessionEnd reason=clear on empty session self-reaps =="
+# /clear creates a new session_id — the old session is dead. If no work was
+# done, cleanup should self-release the marker and lifecycle should reap the
+# worktree in the same pass. Regression test for the bug where /clear left
+# orphan worktrees that accumulated with each /clear cycle.
+CLR_SESSION="t09-clear-empty"
+CLR_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$CLR_SESSION")
+printf '%s' "$CLR_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
+CLR_SB="$REPO/.sandbox/worktrees/sandbox-session-$CLR_SESSION"
+CLR_MARKER="$REPO/.git/sandbox-markers/$CLR_SESSION"
+assert_dir_exists "clear-empty sandbox created" "$CLR_SB"
+assert_file_exists "clear-empty marker created" "$CLR_MARKER"
+CLR_END_IN=$(printf '{"session_id":"%s","reason":"clear"}' "$CLR_SESSION")
+printf '%s' "$CLR_END_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$END_HOOK" >/dev/null 2>&1
+assert_file_absent "clear-empty marker reaped" "$CLR_MARKER"
+assert_dir_absent "clear-empty sandbox reaped" "$CLR_SB"
 
 echo "== SessionEnd reason=compact is heartbeat-only =="
 COMPACT_IN=$(printf '{"session_id":"%s","reason":"compact"}' "$SESSION")

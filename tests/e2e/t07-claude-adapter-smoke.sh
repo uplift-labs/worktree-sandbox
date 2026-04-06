@@ -52,7 +52,7 @@ assert_dir_exists "sandbox preserved on Stop" "$SB_PATH"
 assert_file_exists "marker preserved on Stop" "$REPO/.git/sandbox-markers/$SESSION"
 assert_file_absent "main untouched on Stop" "$REPO/work.txt"
 
-echo "== session-end: reason=clear is a no-op (only heartbeat) =="
+echo "== session-end: reason=clear runs cleanup, preserves unmerged sandbox =="
 CLEAR_IN=$(printf '{"session_id":"%s","reason":"clear"}' "$SESSION")
 OUT=$(printf '%s' "$CLEAR_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-end.sh" 2>&1)
 ec=$?
