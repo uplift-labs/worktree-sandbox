@@ -26,7 +26,11 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
   MSYS. Field 3 is the Unix PID being monitored via `kill -0` (the `--pid`
   argument, typically `$PPID`); `0` in marker-only mode. The heartbeat
   touches the marker every 1s while the owning process is alive; when the
-  PID dies, the heartbeat exits and the marker's mtime freezes. Lifecycle
+  PID dies, the heartbeat invokes `sandbox-cleanup.sh` for immediate
+  session cleanup (capture-commit + self-release + lifecycle), then exits.
+  If `--repo` / `--sandbox-root` were not provided to the heartbeat, it
+  falls back to legacy behavior: mtime freezes and lifecycle's TTL reclaim
+  picks it up on the next SessionStart. Lifecycle
   Phases 2 and 3 verify the owning process independently: field 3 > 0 →
   `kill -0`; else field 2 > 0 → `tasklist` check; else both 0 (marker-only
   mode, no external monitoring) → orphan grace period (default 2h from
@@ -91,6 +95,28 @@ gap) → clean merged worktrees → sweep orphan branches → sweep residual dir
 **Exit:** always `0`. Prints a multi-line report on stdout if any action was
 taken; silent otherwise.
 
+### `sandbox-cleanup`
+
+Session cleanup: capture-commit + self-release + lifecycle.
+
+```
+sandbox-cleanup.sh --repo <dir> --session <id>
+```
+
+| Flag        | Required | Description                          |
+|-------------|----------|--------------------------------------|
+| `--repo`    | yes      | Main repo path                       |
+| `--session` | yes      | Session identifier (marker filename) |
+
+**Phases:** capture-commit pending work (skipped if merge/rebase in progress
+or HEAD is detached) → self-release marker if branch is merged into main AND
+worktree is clean → invoke `sandbox-lifecycle` for full cleanup pass.
+
+**Callers:** `session-end.sh` (graceful exit, after killing heartbeat) and
+`heartbeat.sh` (parent-death cleanup, when SessionEnd never fired).
+
+**Exit:** always `0` (fail-open). Diagnostic output on stderr.
+
 ### `sandbox-merge-gate`
 
 Pre-merge validation. Call from `pre-merge-commit` git hook or session-stop
@@ -114,7 +140,7 @@ load-bearing — don't collapse them:
 | `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox, launch background heartbeat to keep marker fresh while Claude Code PID is alive. |
 | `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
 | `Stop`         | `stop.sh`           | **Per-turn marker heartbeat.** Refreshes marker mtime so lifecycle treats the session as live. Never merges, never cleans, never blocks. |
-| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, (1) capture-commit any pending tracked mods + untracked files in the current sandbox so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
+| `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, then (1) delegate to `sandbox-cleanup.sh` which capture-commits pending work and runs lifecycle. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
 
 **Why the split:** Claude Code's `Stop` hook fires after every agent turn,
 not at session end. Any merge or cleanup in `Stop` would destroy a live

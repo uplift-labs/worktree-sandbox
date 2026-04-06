@@ -3,8 +3,10 @@
 #
 # Launched by the session-start adapter hook, this script runs as a detached
 # background process. It touches the marker file every INTERVAL seconds while
-# the target PID (Claude Code) is alive. When the PID dies, the script stops
-# heartbeating and exits — the marker's mtime freezes, and lifecycle's TTL
+# the target PID (Claude Code) is alive. When the PID dies, the heartbeat
+# invokes sandbox-cleanup.sh for immediate session cleanup (capture-commit +
+# self-release + lifecycle), then exits. If --repo / --sandbox-root are not
+# provided, falls back to legacy behavior: mtime freezes and lifecycle's TTL
 # reclaim picks it up on the next SessionStart.
 #
 # Marker-only mode (--pid 0 or omitted):
@@ -19,20 +21,21 @@
 #   On MSYS, the adapter resolves the Windows PID of the parent claude.exe
 #   process via wmic tree walk and passes it here. Heartbeat checks every
 #   WINPID_CHECK_EVERY ticks whether that native PID is still alive using
-#   wmic. When the PID disappears, heartbeat exits — same as PID mode on
-#   Linux. This closes the gap where SessionEnd never fires (Ctrl+C, terminal
-#   close, crash) and the heartbeat would otherwise run for up to MAX_AGE.
+#   wmic. When the PID disappears, heartbeat runs cleanup and exits — same
+#   as PID mode on Linux.
 #
 # Usage:
 #   bash heartbeat.sh --pid <target-pid> --marker <marker-path> \
 #                      [--interval <seconds>] [--max-age <seconds>] \
-#                      [--parent-winpid <windows-pid>]
+#                      [--parent-winpid <windows-pid>] \
+#                      [--repo <dir>] [--sandbox-root <dir>]
 #
 # Sidecar file:
 #   Writes "<heartbeat_pid> <parent_winpid|0> <monitored_pid|0>" to
-#   "${MARKER}.hb" on startup.  On parent-death exit the sidecar is LEFT
-#   behind (dead PID serves as a signal for lifecycle Phase 3); on signal
-#   exit or marker-gone exit the sidecar is removed.  Field layout:
+#   "${MARKER}.hb" on startup.  On parent-death exit the sidecar is cleaned
+#   up by sandbox-cleanup.sh (or left behind as a dead-PID signal for
+#   lifecycle if cleanup is unavailable).  On signal exit (session-end.sh
+#   sends kill) or marker-gone exit, the sidecar is removed.  Field layout:
 #     $1 = heartbeat PID (used by session-end.sh to kill on clean shutdown)
 #     $2 = Windows PID of parent claude.exe (0 if not on MSYS or unresolved)
 #     $3 = Unix PID being monitored via kill -0 (0 in marker-only mode)
@@ -41,7 +44,8 @@
 #   process alone.
 #
 # Exit conditions (all graceful):
-#   - Target PID dies (kill -0 fails) — PID mode only
+#   - Target PID dies (kill -0 fails) — PID mode only; triggers cleanup
+#   - Windows parent PID dies — MSYS mode; triggers cleanup
 #   - Marker file deleted by someone else
 #   - Max age reached — marker-only mode safety valve
 #   - Heartbeat process receives a signal (trap cleans up sidecar)
@@ -53,6 +57,8 @@ MARKER=""
 INTERVAL=1
 MAX_AGE=86400   # 24 hours — safety valve for marker-only mode
 PARENT_WINPID=""
+REPO=""
+SANDBOX_ROOT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -61,6 +67,8 @@ while [ $# -gt 0 ]; do
     --interval)       INTERVAL="$2";       shift 2 ;;
     --max-age)        MAX_AGE="$2";        shift 2 ;;
     --parent-winpid)  PARENT_WINPID="$2";  shift 2 ;;
+    --repo)           REPO="$2";           shift 2 ;;
+    --sandbox-root)   SANDBOX_ROOT="$2";   shift 2 ;;
     *) shift ;;
   esac
 done
@@ -82,15 +90,16 @@ if [ -n "$PARENT_WINPID" ] && [ "$PARENT_WINPID" != "0" ]; then
 fi
 
 # Write sidecar with our PID.
-# On parent-death exit the sidecar is deliberately LEFT behind so that
-# lifecycle can read the dead PID and confirm the session is dead
-# (_hb_confirmed_dead=true in Phase 3).  On signal exit (session-end.sh
-# sends kill) or marker-gone exit, the sidecar is removed as before.
+# On parent-death: run sandbox-cleanup.sh which handles marker + sidecar
+# removal.  If cleanup is unavailable (no --repo / --sandbox-root), leave
+# sidecar behind as dead-PID signal for lifecycle Phase 3.
+# On signal exit (session-end.sh kills us) or marker-gone: remove sidecar.
 _hb_sidecar="${MARKER}.hb"
 _parent_died=0
+_cleanup_ran=0
 # shellcheck disable=SC2329  # invoked indirectly via trap
 cleanup() {
-  if [ "$_parent_died" = 1 ]; then
+  if [ "$_parent_died" = 1 ] && [ "$_cleanup_ran" = 0 ]; then
     return  # leave sidecar — dead PID is the signal for lifecycle
   fi
   rm -f "$_hb_sidecar" 2>/dev/null
@@ -133,5 +142,25 @@ while true; do
   sleep "$INTERVAL"
   _tick=$((_tick + 1))
 done
+
+# --- On parent death: immediate cleanup via sandbox-cleanup.sh -----------
+#
+# When the parent process dies (crash, SIGKILL, terminal close), session-end.sh
+# never fires. The heartbeat is the only survivor that can clean up. Delegate
+# to sandbox-cleanup.sh which handles capture-commit + self-release + lifecycle.
+#
+# If --repo / --sandbox-root were not provided, fall back to legacy behavior:
+# sidecar stays behind, lifecycle picks up on next SessionStart.
+#
+# Race safety: session-end.sh kills the heartbeat BEFORE calling cleanup. If
+# session-end fires (graceful exit), we never reach this code. If it doesn't
+# fire (crash), we are the only cleanup path. No race possible.
+if [ "$_parent_died" = 1 ] && [ -n "$SANDBOX_ROOT" ] && [ -n "$REPO" ]; then
+  _session=$(basename "$MARKER")
+  if bash "$SANDBOX_ROOT/core/cmd/sandbox-cleanup.sh" \
+       --repo "$REPO" --session "$_session" 2>/dev/null; then
+    _cleanup_ran=1
+  fi
+fi
 
 exit 0

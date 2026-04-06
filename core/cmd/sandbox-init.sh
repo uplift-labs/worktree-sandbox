@@ -49,25 +49,15 @@ done
 [ -z "$SESSION" ] && usage
 
 # Resolve repo root, guard against running inside a linked worktree
-if ! sb_is_worktree "$REPO" >/dev/null 2>&1; then
-  # Return code 2 = not a repo; 1 = main working tree (ok to create here)
-  case "$?" in
-    2) printf 'not a git repository: %s\n' "$REPO"; exit 1 ;;
-  esac
-fi
 # sb_is_worktree returns 0 for linked, 1 for main, 2 for non-repo
-if sb_is_worktree "$REPO" >/dev/null 2>&1; then
-  # Already inside a linked worktree — refuse nesting
-  printf 'refusing to nest: %s is already a linked worktree\n' "$REPO"
-  exit 1
-fi
+sb_is_worktree "$REPO" >/dev/null 2>&1; _wt_rc=$?
+case "$_wt_rc" in
+  0) printf 'refusing to nest: %s is already a linked worktree\n' "$REPO"; exit 1 ;;
+  2) printf 'not a git repository: %s\n' "$REPO"; exit 1 ;;
+esac
 
 GIT_ROOT=$(sb_git_root "$REPO") || { printf 'cannot resolve git root: %s\n' "$REPO"; exit 1; }
-GIT_COMMON=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null)
-case "$GIT_COMMON" in
-  /*|[A-Za-z]:*) ;;
-  *) GIT_COMMON="$GIT_ROOT/$GIT_COMMON" ;;
-esac
+GIT_COMMON=$(sb_git_common_dir "$REPO") || { printf 'cannot resolve git common dir: %s\n' "$REPO"; exit 1; }
 
 # Only run on protected branches (main/master). Other branches are already
 # feature-ish and do not need sandboxing.
