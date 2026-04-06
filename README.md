@@ -1,20 +1,12 @@
 # worktree-sandbox
 
-[![CI](https://github.com/uplift-labs/worktree-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/uplift-labs/worktree-sandbox/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Git worktree isolation and automatic cleanup for AI-assisted development sessions. Keeps `main` untouched. Cleans up after itself. Zero dependencies beyond `bash` and `git`.
 
 ## Quickstart
 
-Install into your project (one command, nothing to clone manually):
-
-```bash
-cd /path/to/your/project
-bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh)
-```
-
-Or with the Claude Code adapter:
+Install into your project with Claude Code
 
 ```bash
 bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/main/remote-install.sh) --with-claude-code
@@ -61,7 +53,7 @@ The tool creates a disposable **git worktree** for each session, enforces a **me
 ```
 main (protected)          sandbox-session-abc123 (worktree)
 │                         │
-│  ┌─── merge gate ───┐  │  AI works here freely
+│  ┌─── merge gate ───┐   │  AI works here freely
 │  │ uncommitted work? │◄─┤  - edits, commits, experiments
 │  │ → block merge     │  │  - main is never touched
 │  │ clean?            │  │
@@ -232,10 +224,10 @@ bash tests/run.sh tests/e2e/t01-happy-path.sh   # single file
 
 | Platform | Status |
 |---|---|
-| Linux | Fully supported, tested in CI |
-| macOS | Fully supported, tested in CI |
-| Windows (Git Bash / MSYS) | Fully supported, tested in CI. Windows-specific code handles PID resolution via `wmic`, path normalization via `cygpath`, and `nohup` workarounds. |
-| Windows (WSL) | Works (same as Linux) |
+| Linux | TBD |
+| macOS | TBD |
+| Windows (Git Bash / MSYS) | Fully supported. Windows-specific code handles PID resolution via `wmic`, path normalization via `cygpath`, and `nohup` workarounds. |
+| Windows (WSL) | TBD |
 | Windows (PowerShell native) | Not supported. No port planned. |
 
 ## Why bash?
