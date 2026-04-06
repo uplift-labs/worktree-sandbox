@@ -224,9 +224,9 @@ bash tests/run.sh tests/e2e/t01-happy-path.sh   # single file
 
 | Platform | Status |
 |---|---|
+| Windows (Git Bash / MSYS) | Fully supported. Windows-specific code handles PID resolution via `wmic`, path normalization via `cygpath`, and `nohup` workarounds. |
 | Linux | TBD |
 | macOS | TBD |
-| Windows (Git Bash / MSYS) | Fully supported. Windows-specific code handles PID resolution via `wmic`, path normalization via `cygpath`, and `nohup` workarounds. |
 | Windows (WSL) | TBD |
 | Windows (PowerShell native) | Not supported. No port planned. |
 
