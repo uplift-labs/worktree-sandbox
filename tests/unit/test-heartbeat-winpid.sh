@@ -67,7 +67,7 @@ else
   _alive_after=0
 fi
 assert_eq "heartbeat exited after parent WINPID died" "0" "$_alive_after"
-assert_file_absent "sidecar cleaned after WINPID death" "${M1}.hb"
+assert_file_exists "sidecar left behind after WINPID death (dead-PID signal)" "${M1}.hb"
 
 # ── 2. Heartbeat keeps running with live parent WINPID ────────────
 echo "== heartbeat keeps running with live parent WINPID =="
@@ -131,6 +131,6 @@ else
   _bogus_alive=0
 fi
 assert_eq "bogus WINPID: heartbeat exited" "0" "$_bogus_alive"
-assert_file_absent "bogus WINPID: sidecar cleaned" "${M4}.hb"
+assert_file_exists "bogus WINPID: sidecar left behind (dead-PID signal)" "${M4}.hb"
 
 test_summary
