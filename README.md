@@ -2,6 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+> **This is a personal pet project. Use at your own risk.**
+
 Git worktree isolation and automatic cleanup for AI-assisted development sessions. Keeps `main` untouched. Cleans up after itself. Zero dependencies beyond `bash` and `git`.
 
 ## Quickstart
