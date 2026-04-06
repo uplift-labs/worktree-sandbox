@@ -40,16 +40,14 @@ assert_contains "output is Claude hookSpecificOutput JSON" "hookSpecificOutput" 
 assert_contains "decision is deny" "\"permissionDecision\":\"deny\"" "$OUT"
 assert_contains "reason present" "permissionDecisionReason" "$OUT"
 
-echo "== stop: clean sandbox passes gate (no block) =="
-# Commit real work so scan-uncommitted is happy.
+echo "== stop: heartbeat only, no block, no merge =="
 echo "work content" > "$SB_PATH/work.txt"
 (cd "$SB_PATH" && git add work.txt && git commit -q -m "feat: add work")
 STOP_IN=$(printf '{"session_id":"%s"}' "$SESSION")
 OUT=$(printf '%s' "$STOP_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/stop.sh" 2>&1)
 ec=$?
 assert_exit "stop exits 0" 0 "$ec"
-assert_not_contains "no block on passing gate" "\"decision\":\"block\"" "$OUT"
-# New invariant: Stop must NOT graduate. Sandbox, marker, and untouched main stay put.
+assert_eq "stop produces no output" "" "$OUT"
 assert_dir_exists "sandbox preserved on Stop" "$SB_PATH"
 assert_file_exists "marker preserved on Stop" "$REPO/.git/sandbox-markers/$SESSION"
 assert_file_absent "main untouched on Stop" "$REPO/work.txt"

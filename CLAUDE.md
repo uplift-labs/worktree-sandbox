@@ -49,7 +49,7 @@ Every file-based marker must carry an expiry — crashed sessions leave immortal
 
 ### Merge gate is the enforcement point
 
-`sandbox-merge-gate.sh` is invoked by the installed `pre-merge-commit` hook (and, in the Claude Code adapter, by the `stop` hook). It blocks merge iff the worktree has tracked modifications / untracked files. This is the single point where worktree cleanliness becomes a hard requirement — changes here affect every downstream host.
+`sandbox-merge-gate.sh` is invoked by the installed `pre-merge-commit` hook. It blocks merge iff the worktree has tracked modifications / untracked files. This is the single point where worktree cleanliness becomes a hard requirement — changes here affect every downstream host.
 
 ## Conventions specific to this repo
 

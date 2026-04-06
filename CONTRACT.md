@@ -113,7 +113,7 @@ load-bearing — don't collapse them:
 |----------------|---------------------|----------------------------------------------------------------------|
 | `SessionStart` | `session-start.sh`  | Run lifecycle, create (or re-banner on compact) the session sandbox, launch background heartbeat to keep marker fresh while Claude Code PID is alive. |
 | `PreToolUse`   | `pre-edit.sh`       | Enforce that Edit/Write lands inside the session's sandbox worktree. |
-| `Stop`         | `stop.sh`           | **Per-turn read-only gate + marker heartbeat.** Never merges, never cleans. Emits `{"decision":"block",...}` if the worktree is unmergeable so the agent gets a chance to fix it on the next turn. |
+| `Stop`         | `stop.sh`           | **Per-turn marker heartbeat.** Refreshes marker mtime so lifecycle treats the session as live. Never merges, never cleans, never blocks. |
 | `SessionEnd`   | `session-end.sh`    | **Durability + housekeeping.** On real terminations (`prompt_input_exit`, `logout`, `other`, ...): (0) kill the heartbeat process for clean shutdown, (1) capture-commit any pending tracked mods + untracked files in the current sandbox so nothing is lost when the process exits, and (2) invoke `sandbox-lifecycle` to reap *other* sandboxes whose branches are already ancestors of `main` and whose worktrees are clean. Does **not** merge the current session's branch. On `clear` / `compact` reasons it only heartbeats the marker. Cannot block exit, so failures are logged and the sandbox is left alive for the TTL safety-net. |
 
 **Why the split:** Claude Code's `Stop` hook fires after every agent turn,

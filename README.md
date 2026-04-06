@@ -119,16 +119,13 @@ directory per session.
 ### Phase B — Live session (per-turn Stop)
 
 `adapters/claude-code/hooks/stop.sh` runs after **every agent turn**, not
-at session end. Its job is deliberately small:
+at session end. Its only job:
 
 1. **Heartbeat** the marker (`touch`) so lifecycle's TTL reclaim treats the
    session as live even on long, quiet turns.
-2. Run `sandbox-merge-gate` as a **read-only** check. On failure (tracked
-   modifications, untracked files) emit
-   `{"decision":"block","reason":"..."}` so the agent gets a chance to fix
-   it on the next turn.
-3. On success — do nothing else. **No merge. No cleanup. No marker removal.**
-   The sandbox stays alive for the next turn.
+
+**No merge. No cleanup. No blocking.** Filesystem cleanliness is enforced
+at merge time by the `pre-merge-commit` hook, not mid-session.
 
 ### Phase C — Durability + housekeeping (SessionEnd)
 

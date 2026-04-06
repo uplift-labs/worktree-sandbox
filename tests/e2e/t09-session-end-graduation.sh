@@ -33,8 +33,7 @@ MARKER="$REPO/.git/sandbox-markers/$SESSION"
 BRANCH="sandbox-session-$SESSION"
 assert_dir_exists "sandbox created" "$SB_PATH"
 
-echo "== multi-turn: Stop with passing gate keeps sandbox alive across turns =="
-# Commit real work so scan-uncommitted is happy.
+echo "== multi-turn: Stop heartbeat keeps sandbox alive across turns =="
 echo "payload" > "$SB_PATH/feature.txt"
 (cd "$SB_PATH" && git add feature.txt && git commit -q -m "feat: payload")
 
@@ -43,7 +42,7 @@ for turn in 1 2 3; do
   OUT=$(printf '%s' "$STOP_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$STOP_HOOK" 2>&1)
   ec=$?
   assert_exit "Stop turn $turn exits 0" 0 "$ec"
-  assert_not_contains "Stop turn $turn no block" "\"decision\":\"block\"" "$OUT"
+  assert_eq "Stop turn $turn no output" "" "$OUT"
   assert_dir_exists "sandbox alive after turn $turn" "$SB_PATH"
   assert_file_exists "marker alive after turn $turn" "$MARKER"
   assert_file_absent "main untouched after turn $turn" "$REPO/feature.txt"
