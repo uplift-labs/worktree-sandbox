@@ -1,10 +1,10 @@
 #!/bin/bash
-# run.sh — test runner for singularity-sandbox
+# run.sh — test runner for worktree-sandbox
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-export SINGULARITY_SANDBOX_ROOT="$PROJECT_ROOT"
+export WORKTREE_SANDBOX_ROOT="$PROJECT_ROOT"
 
 MODE="${1:-all}"
 PASS=0; FAIL=0; FILES=0; FAILED_FILES=""

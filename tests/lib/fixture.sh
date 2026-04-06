@@ -18,7 +18,7 @@ fixture_repo() {
   (
     cd "$dir" || exit 1
     git init -q -b main
-    git config user.email "test@singularity-sandbox.local"
+    git config user.email "test@worktree-sandbox.local"
     git config user.name "Test"
     echo "# $name" > README.md
     git add README.md

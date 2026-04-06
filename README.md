@@ -1,4 +1,4 @@
-# singularity-sandbox
+# worktree-sandbox
 
 > Git worktree isolation + auto-cleanup for AI-assisted (and human)
 > development. Keeps main untouchable. Cleans up after itself.
@@ -13,7 +13,7 @@ Two recurring failure modes in AI-assisted development:
 2. **Abandoned state.** Crashed sessions leave stale worktrees, orphan
    branches, and marker files that pile up for months.
 
-singularity-sandbox fixes both with a tiny tool-agnostic bash layer.
+worktree-sandbox fixes both with a tiny tool-agnostic bash layer.
 
 ## How it works
 
@@ -32,9 +32,9 @@ git `pre-merge-commit` hook. The core is plain bash scripts you can call.
 ## Install
 
 ```
-git clone https://github.com/sergey-akhalkov/singularity-sandbox
+git clone https://github.com/uplift-labs/worktree-sandbox
 cd /path/to/your/project
-bash /path/to/singularity-sandbox/install.sh
+bash /path/to/worktree-sandbox/install.sh
 ```
 
 This installs to `.sandbox/core/` in your project and wires a
@@ -42,7 +42,7 @@ This installs to `.sandbox/core/` in your project and wires a
 Claude Code adapter:
 
 ```
-bash /path/to/singularity-sandbox/install.sh --with-claude-code
+bash /path/to/worktree-sandbox/install.sh --with-claude-code
 ```
 
 The adapter lands at `.sandbox/adapter/` and its hook config is merged into

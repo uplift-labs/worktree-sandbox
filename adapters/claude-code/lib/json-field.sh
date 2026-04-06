@@ -2,7 +2,7 @@
 # json-field.sh — extract a JSON string value by key.
 # Tolerates both compact {"key":"val"} and pretty-printed {"key": "val"}.
 # This is a minimal, dependency-free alternative to jq for hot-path hook use.
-# Source: adapted from the singularity project's guards/core/lib/json-field.sh.
+# Source: adapted from guards/core/lib/json-field.sh.
 
 json_field() {
   local key="$1" json="$2"

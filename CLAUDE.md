@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`singularity-sandbox` is a tool-agnostic bash layer that enforces git-worktree isolation and TTL-based cleanup for AI-assisted (and human) sessions. Zero runtime dependencies beyond `bash` and `git`. Target environments: Linux, macOS, Git Bash / WSL on Windows. All code must stay lint-clean under `shellcheck` (config in `.shellcheckrc`).
+`worktree-sandbox` is a tool-agnostic bash layer that enforces git-worktree isolation and TTL-based cleanup for AI-assisted (and human) sessions. Zero runtime dependencies beyond `bash` and `git`. Target environments: Linux, macOS, Git Bash / WSL on Windows. All code must stay lint-clean under `shellcheck` (config in `.shellcheckrc`).
 
-The parent repo `D:\singularity\CLAUDE.md` applies on top of this file — guard conventions, worktree discipline, and commit discipline in that file override defaults.
+The parent repo CLAUDE.md applies on top of this file — guard conventions, worktree discipline, and commit discipline in that file override defaults.
 
 ## Commands
 
@@ -20,7 +20,7 @@ bash install.sh --target <repo>                     # install core + pre-merge-c
 bash install.sh --target <repo> --with-claude-code  # also install CC adapter hooks
 ```
 
-The test runner sets `SINGULARITY_SANDBOX_ROOT` to the project root and executes each `*.sh` file under `tests/unit` and `tests/e2e` as its own bash script. A test file is "pass" iff it exits `0`. There is no per-assertion selector — to run a single case, run the whole file.
+The test runner sets `WORKTREE_SANDBOX_ROOT` to the project root and executes each `*.sh` file under `tests/unit` and `tests/e2e` as its own bash script. A test file is "pass" iff it exits `0`. There is no per-assertion selector — to run a single case, run the whole file.
 
 All tests create real temporary git repos via `mktemp -d` + `git init`. There are no mocks, no fixtures checked in. `tests/lib/assert.sh` and `tests/lib/fixture.sh` are the only shared helpers.
 

@@ -1,7 +1,7 @@
 #!/bin/bash
-# t08 — --worktrees-dir and --branch-prefix flags (Singularity compat path).
+# t08 — --worktrees-dir and --branch-prefix flags (custom layout path).
 # Verifies that sandbox-init and sandbox-lifecycle honour non-default layout
-# so host projects with their own conventions (e.g. Singularity's
+# so host projects with their own conventions (e.g.
 # .claude/worktrees/ + worktree-session-* naming) can delegate to the core
 # without migrating existing worktrees.
 set -u

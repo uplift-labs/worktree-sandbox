@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial extraction from singularity monorepo.
+- Initial extraction from monorepo.
 - `core/lib/` — tool-agnostic bash primitives (git context, TASK.md parsing,
   uncommitted scanning, TTL markers, worktree cleanup).
 - `core/cmd/` — high-level CLI commands (sandbox-init, sandbox-guard,
@@ -18,4 +18,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   TTL reclaim, parallel sessions, nested rejection, adapter smoke.
 - GitHub Actions CI matrix (ubuntu, macOS).
 
-[Unreleased]: https://github.com/sergey-akhalkov/singularity-sandbox/commits/main
+[Unreleased]: https://github.com/uplift-labs/worktree-sandbox/commits/main
