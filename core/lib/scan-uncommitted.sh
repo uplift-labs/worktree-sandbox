@@ -15,6 +15,10 @@ sb_scan_uncommitted() {
   [ ! -d "$wt_path" ] && return 0
 
   local status tracked untracked
+  # Refresh stat cache to avoid phantom modifications on Windows/MSYS where
+  # stale index timestamps cause git status to report files as modified even
+  # when their content is identical to HEAD.
+  git -C "$wt_path" update-index --refresh >/dev/null 2>&1 || true
   status=$(git -C "$wt_path" status --porcelain 2>/dev/null)
   if [ -z "$status" ]; then
     tracked=0
