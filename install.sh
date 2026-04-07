@@ -6,8 +6,8 @@
 #
 # By default installs only the core commands + a pre-merge-commit git hook that
 # runs sandbox-merge-gate. With --with-claude-code, also installs the Claude
-# Code adapter hooks and a settings-hooks.json snippet (auto-merged if jq
-# is available, otherwise printed for manual merge).
+# Code adapter hooks and a settings-hooks.json snippet (auto-merged via
+# python3; requires python3 on PATH).
 
 set -u
 
@@ -67,6 +67,8 @@ printf '[install] copying core to %s\n' "$INSTALL_ROOT/core"
 sync_sh_dir "$SCRIPT_DIR/core/lib" "$INSTALL_ROOT/core/lib"
 sync_sh_dir "$SCRIPT_DIR/core/cmd" "$INSTALL_ROOT/core/cmd"
 chmod +x "$INSTALL_ROOT/core/cmd/"*.sh
+# Copy json-merge.py (used by --with-claude-code settings merge).
+cp "$SCRIPT_DIR/core/lib/json-merge.py" "$INSTALL_ROOT/core/lib/" 2>/dev/null || true
 
 GIT_COMMON=$(git -C "$TARGET" rev-parse --git-common-dir 2>/dev/null)
 case "$GIT_COMMON" in

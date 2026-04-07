@@ -11,7 +11,7 @@ Git worktree isolation and automatic cleanup for AI-assisted development session
 Install into your project with Claude Code
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.0.1/remote-install.sh) --with-claude-code
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-claude-code
 ```
 
 That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
@@ -84,6 +84,7 @@ worktree-sandbox/
 │   │   ├── sandbox-cleanup.sh
 │   │   └── sandbox-merge-gate.sh
 │   └── lib/         ← internal helpers (not public API)
+│       └── json-merge.py  ← idempotent settings.json merger
 ├── adapters/
 │   └── claude-code/ ← host-specific translation layer
 └── install.sh
@@ -110,7 +111,7 @@ All `core/cmd/` scripts exit `0` silently when git context can't be resolved (no
 **One-liner (remote):**
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.0.1/remote-install.sh) --with-claude-code
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-claude-code
 ```
 
 **From a local clone:**
@@ -120,7 +121,7 @@ git clone https://github.com/uplift-labs/worktree-sandbox
 bash worktree-sandbox/install.sh --with-claude-code
 ```
 
-Installs `core/` to `.sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks. With `--with-claude-code`, the adapter goes to `.sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (via `jq` if available, otherwise printed for manual merge).
+Installs `core/` to `.sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks. With `--with-claude-code`, the adapter goes to `.sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`).
 
 Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.sandbox/` on every merge.
 
@@ -220,7 +221,7 @@ bash tests/run.sh e2e           # e2e only
 bash tests/run.sh tests/e2e/t01-happy-path.sh   # single file
 ```
 
-25 test files (7 unit + 18 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
+26 test files (7 unit + 19 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
 
 ## Platform support
 
