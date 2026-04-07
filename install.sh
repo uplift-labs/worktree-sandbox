@@ -190,18 +190,13 @@ if [ "$WITH_CC" -eq 1 ]; then
   SETTINGS="$TARGET/.claude/settings.json"
   mkdir -p "$TARGET/.claude"
 
-  if [ ! -f "$SETTINGS" ]; then
-    printf '[install] creating %s\n' "$SETTINGS"
-    cp "$SNIPPET" "$SETTINGS"
-  elif command -v jq >/dev/null 2>&1; then
-    printf '[install] merging hooks into %s via jq\n' "$SETTINGS"
-    tmp=$(mktemp)
-    jq -s ".[0] * .[1]" "$SETTINGS" "$SNIPPET" > "$tmp" && mv "$tmp" "$SETTINGS"
-  else
-    printf '[install] jq not found — manual merge required.\n' >&2
-    printf '  merge this snippet into %s:\n\n' "$SETTINGS" >&2
-    cat "$SNIPPET" >&2
+  MERGER="$SCRIPT_DIR/core/lib/json-merge.py"
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '[install] ERROR: python3 required to merge hooks into settings.json.\n' >&2
+    exit 1
   fi
+  printf '[install] merging hooks into %s\n' "$SETTINGS"
+  python3 "$MERGER" "$SETTINGS" "$SNIPPET"
 fi
 
 printf '[install] done.\n'
