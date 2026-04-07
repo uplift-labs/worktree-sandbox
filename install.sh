@@ -181,6 +181,11 @@ if [ "$WITH_CC" -eq 1 ]; then
   sync_sh_dir "$SCRIPT_DIR/adapters/claude-code/hooks" "$ADAPTER_DIR/hooks"
   chmod +x "$ADAPTER_DIR/hooks/"*.sh
 
+  # Patch ROOT path for installed layout.
+  # Source tree: adapters/claude-code/hooks → ROOT is ADAPTER_DIR/../..  (2 levels)
+  # Installed:   adapter/hooks              → ROOT is ADAPTER_DIR/..     (1 level)
+  sed -i 's|ADAPTER_DIR/\.\./\.\.|ADAPTER_DIR/..|' "$ADAPTER_DIR/hooks/"*.sh
+
   SNIPPET="$SCRIPT_DIR/adapters/claude-code/settings-hooks.json"
   SETTINGS="$TARGET/.claude/settings.json"
   mkdir -p "$TARGET/.claude"
