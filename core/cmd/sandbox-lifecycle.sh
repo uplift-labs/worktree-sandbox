@@ -286,7 +286,7 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     # Merged into main AND clean AND session did real work → marker is no
     # longer load-bearing.
     if git -C "$_sb" merge-base --is-ancestor "$_branch" "$MAIN_BRANCH" 2>/dev/null \
-       && sb_scan_uncommitted "$_sb" >/dev/null 2>&1; then
+       && sb_scan_uncommitted "$_sb" --ignore-deletions >/dev/null 2>&1; then
       rm -f "$mf" "${mf}.hb" 2>/dev/null || true
     fi
   done
