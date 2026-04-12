@@ -90,7 +90,7 @@ _main=$(sb_main_branch "$REPO" 2>/dev/null || true)
 if [ "$_can_commit" = 1 ] \
    && [ -n "$_main" ] \
    && git -C "$SB" merge-base --is-ancestor "$BRANCH" "$_main" 2>/dev/null \
-   && sb_scan_uncommitted "$SB" >/dev/null 2>&1; then
+   && sb_scan_uncommitted "$SB" --ignore-deletions >/dev/null 2>&1; then
   rm -f "$MARKER" "${MARKER}.hb" 2>/dev/null || true
 fi
 

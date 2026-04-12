@@ -40,8 +40,11 @@ sb_wt_remove_if_merged() {
   fi
 
   # Check 2: filesystem clean?
+  # Pass --ignore-deletions: Check 1 confirmed branch is merged into main, so
+  # ' D' entries are phantom staleness (files deleted in main after branch
+  # creation), not real unsaved work worth preserving.
   local scan_summary
-  if ! scan_summary=$(sb_scan_uncommitted "$wt_path"); then
+  if ! scan_summary=$(sb_scan_uncommitted "$wt_path" --ignore-deletions); then
     if [ -n "$detail" ] && [ "$detail" != "needs manual review" ]; then
       printf 'PRESERVED %s — unsaved work: %s | %s' "$wt_branch" "$scan_summary" "$detail"
     else

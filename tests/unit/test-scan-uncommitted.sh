@@ -36,4 +36,34 @@ echo "== nonexistent wt-path returns 0 =="
 sb_scan_uncommitted "$FIXTURE_ROOT/nowhere" && ec=0 || ec=$?
 assert_exit "nowhere returns 0" 0 "$ec"
 
+# --- --ignore-deletions flag tests ---
+
+echo "== phantom ' D' filtered with --ignore-deletions =="
+REPO2=$(fixture_repo "r2")
+(cd "$REPO2" && mkdir -p data && echo "x" > data/a.md && echo "y" > data/b.md && git add -A && git commit -q -m "add files")
+rm "$REPO2/data/a.md" "$REPO2/data/b.md"
+# Without flag: dirty
+out=$(sb_scan_uncommitted "$REPO2") && ec=0 || ec=$?
+assert_exit "deletions dirty without flag" 1 "$ec"
+assert_contains "reports modified" "modified" "$out"
+# With flag: clean
+out=$(sb_scan_uncommitted "$REPO2" --ignore-deletions) && ec=0 || ec=$?
+assert_exit "deletions clean with flag" 0 "$ec"
+
+echo "== real modifications NOT filtered by --ignore-deletions =="
+REPO3=$(fixture_repo "r3")
+echo "changed" >> "$REPO3/README.md"
+out=$(sb_scan_uncommitted "$REPO3" --ignore-deletions) && ec=0 || ec=$?
+assert_exit "real mod still dirty" 1 "$ec"
+assert_contains "still reports modified" "modified" "$out"
+
+echo "== mixed phantom deletions + real modifications =="
+REPO4=$(fixture_repo "r4")
+(cd "$REPO4" && mkdir -p data && echo "x" > data/del.md && git add -A && git commit -q -m "add file")
+rm "$REPO4/data/del.md"
+echo "changed" >> "$REPO4/README.md"
+out=$(sb_scan_uncommitted "$REPO4" --ignore-deletions) && ec=0 || ec=$?
+assert_exit "mixed still dirty" 1 "$ec"
+assert_contains "reports 1 modified" "1 modified" "$out"
+
 test_summary
