@@ -146,6 +146,17 @@ MARKERS_DIR="$GIT_COMMON/sandbox-markers"
 REMOVED=0
 LINES=""
 
+# Phase 0: rescue orphaned sidecar files from sandbox worktrees.
+#
+# Sidecar files (e.g. session reflections) written inside a sandbox worktree
+# get stranded when the worktree ends up PRESERVED (unmerged-stale or flagged
+# as unsaved work). Without rescue, downstream consumers never see them.
+# Running before the worktree-reap phases (1-6) also has a useful side-effect:
+# removing the files from the worktree drops one category of "unsaved work"
+# that was blocking reap, so subsequent phases can reclaim the worktree too.
+RESCUE_OUT=$(bash "$ROOT/core/cmd/reflection-rescue.sh" --repo "$GIT_ROOT" 2>/dev/null || true)
+[ -n "$RESCUE_OUT" ] && LINES="${LINES}${RESCUE_OUT}"$'\n'
+
 # Phase 1: prune stale git worktree metadata
 sb_wt_prune_metadata "$GIT_ROOT"
 
