@@ -24,12 +24,21 @@
 
 sb_marker_write() {
   local path="$1" value="$2" initial_head="${3:-}"
-  mkdir -p "$(dirname "$path")" 2>/dev/null
+  local tmp="$path.tmp.$$"
+  # Surface mkdir failures — a silent failure here cascades into worktree
+  # loss via lifecycle Phase 2 reaping an unprotected sandbox.
+  mkdir -p "$(dirname "$path")" || return 1
   if [ -n "$initial_head" ]; then
-    printf '%s %s %s' "$value" "$(date +%s)" "$initial_head" > "$path"
+    printf '%s %s %s' "$value" "$(date +%s)" "$initial_head" > "$tmp" \
+      || { rm -f "$tmp" 2>/dev/null; return 1; }
   else
-    printf '%s %s' "$value" "$(date +%s)" > "$path"
+    printf '%s %s' "$value" "$(date +%s)" > "$tmp" \
+      || { rm -f "$tmp" 2>/dev/null; return 1; }
   fi
+  # Atomic rename — guarantees the marker is either absent or complete,
+  # never partially written even if the process crashes mid-write.
+  mv -f "$tmp" "$path" || { rm -f "$tmp" 2>/dev/null; return 1; }
+  return 0
 }
 
 sb_marker_read_value() {
