@@ -189,10 +189,20 @@ if [ -d "$MARKERS_DIR" ]; then
     # the worktree looks indistinguishable from a merged+clean dead session.
     # Use ORPHAN_HB_GRACE instead of the short TTL — the session might still be
     # active with a dead heartbeat (e.g., parent PID resolution raced on MSYS).
+    #
+    # Malformed/legacy marker protection: if _init_head is empty — either a
+    # legacy marker pre-dating the initial_head field, or a partially-written
+    # marker from a failed sb_marker_write — apply the same extended TTL. The
+    # short TTL (5s) is too aggressive to distinguish live-but-legacy from
+    # genuinely corrupt. Genuinely corrupt markers still get reaped after
+    # FRESH_SESSION_TTL (5 min), keeping leak bounded.
     _effective_ttl="$TTL"
     if [ -n "$_m_branch" ]; then
       _init_head=$(sb_marker_read_initial_head "$mf")
-      if [ -n "$_init_head" ] && [ -d "$_m_wt" ]; then
+      if [ -z "$_init_head" ]; then
+        _effective_ttl="$FRESH_SESSION_TTL"
+        LINES="${LINES}WARN malformed/legacy marker: $(basename "$mf")"$'\n'
+      elif [ -d "$_m_wt" ]; then
         _cur_head=$(git -C "$_m_wt" rev-parse HEAD 2>/dev/null || true)
         if [ "$_cur_head" = "$_init_head" ]; then
           _effective_ttl="$FRESH_SESSION_TTL"

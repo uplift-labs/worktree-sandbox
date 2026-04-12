@@ -92,7 +92,17 @@ if ! git -C "$GIT_ROOT" worktree add "$WT_PATH" -b "$WT_BRANCH" "$BASE" >/dev/nu
 fi
 
 INIT_HEAD=$(git -C "$WT_PATH" rev-parse HEAD 2>/dev/null || true)
-sb_marker_write "$MARKER" "$WT_BRANCH" "$INIT_HEAD"
+# Hard-fail on marker write error — without a marker the worktree has no
+# protection from sandbox-lifecycle Phase 2/4 reaping. Better to refuse
+# creation than return an unprotected sandbox path the caller will trust.
+if ! sb_marker_write "$MARKER" "$WT_BRANCH" "$INIT_HEAD"; then
+  printf 'marker write failed: %s\n' "$MARKER"
+  # Roll back the worktree + branch so no phantom is left for the next
+  # lifecycle pass to sweep and no stale ref lingers in the repo.
+  git -C "$GIT_ROOT" worktree remove --force "$WT_PATH" >/dev/null 2>&1 || true
+  git -C "$GIT_ROOT" branch -D "$WT_BRANCH" >/dev/null 2>&1 || true
+  exit 1
+fi
 
 printf '%s\n' "$WT_PATH"
 exit 0
