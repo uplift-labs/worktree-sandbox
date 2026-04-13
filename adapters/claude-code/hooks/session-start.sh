@@ -50,9 +50,14 @@ _resolve_parent_winpid() {
     esac
     _wpid="$_parent"
   done
-  # Didn't find claude.exe — return the highest ancestor we reached.
-  # Better than nothing: any ancestor dying means Claude Code is gone.
-  printf '%s' "$_wpid"
+  # Didn't find claude.exe within the scanned depth. Returning the highest
+  # ancestor (bash.exe / cmd.exe / an ephemeral shim) was a ghost-worktree
+  # trigger: that ancestor dies quickly even while Claude Code is alive, and
+  # heartbeat treats it as parent-death → destructive cleanup on a live
+  # session. Return empty instead — heartbeat falls back to marker-only mode
+  # guarded by MAX_AGE (24h). A stale orphan is strictly safer than instant
+  # destruction of the user's sandbox.
+  return 0
 }
 
 # _launch_heartbeat <marker-path>
@@ -67,6 +72,12 @@ _launch_heartbeat() {
   if [ "$_is_msys" = 1 ]; then
     local _winpid
     _winpid=$(_resolve_parent_winpid)
+    if [ -z "$_winpid" ]; then
+      # Surface the degraded mode so users understand why session-end may be
+      # delayed on crashes. In marker-only mode heartbeat keeps the sandbox
+      # alive until MAX_AGE (24h) rather than reacting to parent death.
+      printf '[sandbox] WARN: claude.exe not found in process tree — heartbeat in marker-only mode (24h TTL).\n'
+    fi
     ( bash "$ROOT/core/lib/heartbeat.sh" \
         --pid 0 --marker "$_marker" \
         --repo "$REPO" --sandbox-root "$ROOT" \
@@ -105,5 +116,10 @@ if SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION
 
   # Launch heartbeat — keeps marker fresh while Claude Code is alive.
   _launch_heartbeat "$REPO/.git/sandbox-markers/$SESSION"
+else
+  # Surface sandbox creation failure. Without this banner the failure is
+  # silent — the session runs in the main repo thinking it has isolation
+  # and the user only discovers it when an edit lands outside the sandbox.
+  printf '[sandbox] WARN: sandbox creation failed — working without isolation. Details: %s\n' "${SB:-<no output>}"
 fi
 exit 0

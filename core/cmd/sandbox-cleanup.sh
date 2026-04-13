@@ -29,14 +29,17 @@ CMD_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/git-context.sh"
 . "$ROOT/core/lib/scan-uncommitted.sh"
+. "$ROOT/core/lib/ttl-marker.sh"
+. "$ROOT/core/lib/cleanup-log.sh"
 
 usage() { printf 'usage: sandbox-cleanup.sh --repo <dir> --session <id>\n' >&2; exit 2; }
 
-REPO=""; SESSION=""
+REPO=""; SESSION=""; TRUST_DEAD=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)    REPO="$2"; shift 2 ;;
-    --session) SESSION="$2"; shift 2 ;;
+    --repo)       REPO="$2"; shift 2 ;;
+    --session)    SESSION="$2"; shift 2 ;;
+    --trust-dead) TRUST_DEAD=1; shift ;;
     -h|--help) usage ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; usage ;;
   esac
@@ -87,11 +90,37 @@ fi
 # Any uncertainty falls through: marker stays, lifecycle's TTL safety-net
 # handles cleanup later.
 _main=$(sb_main_branch "$REPO" 2>/dev/null || true)
+_init_head=$(sb_marker_read_initial_head "$MARKER")
+_cur_head=$(git -C "$SB" rev-parse HEAD 2>/dev/null || true)
+
+# Critical guard (mirrors sandbox-lifecycle.sh Phase 3): a fresh session whose
+# branch has never diverged from main (HEAD == initial_head) looks structurally
+# identical to a completed+merged session at the branch level â€” merge-base says
+# "ancestor", scan-uncommitted says "clean". Without the initial_head check,
+# Phase 2 releases the marker of a live session that simply hasn't committed
+# yet, and lifecycle's Phase 3 reap destroys the worktree while the user is
+# still working in it. Legacy markers (empty initial_head) also fall through
+# to TTL safety net.
+# When --trust-dead is passed (session-end.sh), the session has already
+# ended — skip the initial_head guard. An empty session that terminated
+# should self-reap (no live process to destroy). Without --trust-dead
+# (heartbeat parent-death cleanup), keep the guard: parent-death detection
+# can false-positive and destroying a live worktree is much worse than a
+# bounded orphan.
+_fresh_guard_ok=1
+if [ "$TRUST_DEAD" != "1" ]; then
+  if [ -z "$_init_head" ] || [ -z "$_cur_head" ] || [ "$_cur_head" = "$_init_head" ]; then
+    _fresh_guard_ok=0
+  fi
+fi
+
 if [ "$_can_commit" = 1 ] \
    && [ -n "$_main" ] \
+   && [ "$_fresh_guard_ok" = 1 ] \
    && git -C "$SB" merge-base --is-ancestor "$BRANCH" "$_main" 2>/dev/null \
    && sb_scan_uncommitted "$SB" --ignore-deletions >/dev/null 2>&1; then
   rm -f "$MARKER" "${MARKER}.hb" 2>/dev/null || true
+  sb_cleanup_log "$ROOT" "RELEASE" "$SESSION" "$BRANCH" "cleanup-phase2-self-release"
 fi
 
 # --- Phase 3: lifecycle reap -----------------------------------------------
