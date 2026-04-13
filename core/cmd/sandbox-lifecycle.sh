@@ -30,6 +30,7 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/scan-uncommitted.sh"
 . "$ROOT/core/lib/ttl-marker.sh"
 . "$ROOT/core/lib/wt-cleanup.sh"
+. "$ROOT/core/lib/cleanup-log.sh"
 
 usage() { printf 'usage: sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]\n' >&2; exit 2; }
 
@@ -182,6 +183,7 @@ if [ -d "$MARKERS_DIR" ]; then
           [ -n "$_hb_pid" ] && kill "$_hb_pid" 2>/dev/null || true
         fi
         rm -f "$mf" "${mf}.hb" 2>/dev/null || true
+        sb_cleanup_log "$ROOT" "PRUNE" "$(basename "$mf")" "$_m_branch" "lifecycle-phase2-orphan-marker"
         continue
       fi
     fi
@@ -224,6 +226,7 @@ if [ -d "$MARKERS_DIR" ]; then
     # Standard TTL check on mtime (uses extended TTL for fresh sessions).
     if ! sb_marker_is_fresh "$mf" "$_effective_ttl"; then
       rm -f "$mf" "${mf}.hb" 2>/dev/null || true
+      sb_cleanup_log "$ROOT" "PRUNE" "$(basename "$mf")" "${_m_branch:--}" "lifecycle-phase2-ttl-reclaim ttl=$_effective_ttl"
     fi
   done
 fi
@@ -288,6 +291,7 @@ if [ -d "$MARKERS_DIR" ] && [ -n "$MAIN_BRANCH" ]; then
     if git -C "$_sb" merge-base --is-ancestor "$_branch" "$MAIN_BRANCH" 2>/dev/null \
        && sb_scan_uncommitted "$_sb" --ignore-deletions >/dev/null 2>&1; then
       rm -f "$mf" "${mf}.hb" 2>/dev/null || true
+      sb_cleanup_log "$ROOT" "RELEASE" "$(basename "$mf")" "$_branch" "lifecycle-phase3-proactive-release"
     fi
   done
 fi
@@ -316,8 +320,14 @@ while IFS="	" read -r WT_PATH WT_BRANCH; do
 
   status=$(sb_wt_remove_if_merged "$GIT_ROOT" "$WT_PATH" "$WT_BRANCH" "$MAIN_BRANCH" "stale") || true
   case "$status" in
-    "REMOVED "*) REMOVED=$((REMOVED + 1)); LINES="${LINES}${status}\n" ;;
-    "PRESERVED "*) LINES="${LINES}${status}\n" ;;
+    "REMOVED "*)
+      REMOVED=$((REMOVED + 1)); LINES="${LINES}${status}\n"
+      sb_cleanup_log "$ROOT" "DESTROY" "-" "$WT_BRANCH" "lifecycle-phase4-wt-remove"
+      ;;
+    "PRESERVED "*)
+      LINES="${LINES}${status}\n"
+      sb_cleanup_log "$ROOT" "PRESERVE" "-" "$WT_BRANCH" "lifecycle-phase4-preserve"
+      ;;
   esac
 done <<SBL
 $(sb_list_worktrees "$GIT_ROOT")

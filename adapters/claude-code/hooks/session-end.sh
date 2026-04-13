@@ -60,6 +60,6 @@ if [ -f "${MARKER}.hb" ]; then
 fi
 
 # Delegate cleanup to core (capture-commit + self-release + lifecycle).
-bash "$ROOT/core/cmd/sandbox-cleanup.sh" --repo "$REPO" --session "$SESSION"
+bash "$ROOT/core/cmd/sandbox-cleanup.sh" --repo "$REPO" --session "$SESSION" --trust-dead
 
 exit 0

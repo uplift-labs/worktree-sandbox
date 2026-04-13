@@ -52,6 +52,10 @@
 
 set -u
 
+# Detect MSYS/Windows for tasklist-based sanity check before destructive cleanup.
+_is_msys=0
+case "$(uname -s)" in MINGW*|MSYS*) _is_msys=1 ;; esac
+
 PID=""
 MARKER=""
 INTERVAL=1
@@ -165,6 +169,38 @@ done
 # fire (crash), we are the only cleanup path. No race possible.
 if [ "$_parent_died" = 1 ] && [ -n "$SANDBOX_ROOT" ] && [ -n "$REPO" ]; then
   _session=$(basename "$MARKER")
+
+  # Load cleanup log helper for diagnostic trail. Best-effort source — if the
+  # file is missing (e.g., older installed copy), the helper calls below become
+  # no-ops via the stub defined right after.
+  # shellcheck disable=SC1091
+  . "$SANDBOX_ROOT/core/lib/cleanup-log.sh" 2>/dev/null || sb_cleanup_log() { :; }
+
+  # Final sanity check: even if our specific parent-winpid was classified as
+  # dead, a live claude.exe anywhere in the system means this was likely a
+  # false-positive (wrong ancestor monitored, wmic race, etc.). Aborting
+  # cleanup in that case trades a potential orphan worktree (bounded by
+  # MAX_AGE safety valve, ~24h) for avoiding instant destruction of a live
+  # user session — a strictly safer failure mode.
+  _skip_cleanup=0
+  if [ "$_is_msys" = 1 ] && command -v tasklist >/dev/null 2>&1; then
+    if tasklist /FI "IMAGENAME eq claude.exe" /NH 2>/dev/null | grep -qi 'claude\.exe' \
+       || tasklist /FI "IMAGENAME eq claude-code.exe" /NH 2>/dev/null | grep -qi 'claude-code\.exe' \
+       || tasklist /FI "IMAGENAME eq claude-desktop.exe" /NH 2>/dev/null | grep -qi 'claude-desktop\.exe'; then
+      _skip_cleanup=1
+    fi
+  fi
+
+  if [ "$_skip_cleanup" = 1 ]; then
+    sb_cleanup_log "$SANDBOX_ROOT" "SKIP" "$_session" "-" "heartbeat-sanity-live-claude-exe"
+    # Drop the .hb sidecar so the (now-exiting) heartbeat doesn't look alive
+    # to lifecycle. Keep the marker — session appears live to the owner.
+    rm -f "$_hb_sidecar" 2>/dev/null || true
+    _cleanup_ran=1  # suppress the "leave sidecar behind" branch in trap
+    exit 0
+  fi
+
+  sb_cleanup_log "$SANDBOX_ROOT" "DESTROY" "$_session" "-" "heartbeat-parent-death"
   if bash "$SANDBOX_ROOT/core/cmd/sandbox-cleanup.sh" \
        --repo "$REPO" --session "$_session" 2>/dev/null; then
     _cleanup_ran=1
