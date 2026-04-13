@@ -84,7 +84,7 @@ sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]
 |-------------------|----------|-----------------------|--------------------------|
 | `--repo`          | yes      | —                     | Main repo path           |
 | `--ttl`           | no       | `5`                   | Marker TTL in seconds (stale reclaim) |
-| `--branch-prefix` | no       | `sandbox-session-*`   | Glob for orphan branch sweep |
+| `--branch-prefix` | no       | `wt-*`                | Glob for orphan branch sweep |
 | `--worktrees-dir` | no       | `.sandbox/worktrees`  | Worktree directory relative to repo root |
 
 **Phases:** prune metadata → reclaim stale markers (TTL, with heartbeat

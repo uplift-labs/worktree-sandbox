@@ -12,8 +12,8 @@
 # Behaviour:
 #   - If the current dir is already inside a linked worktree, no-op (exit 0).
 #   - If the session already has a fresh marker (TTL 24h), no-op.
-#   - Otherwise: create <repo>/.sandbox/worktrees/<session>, a branch
-#     sandbox-session-<short-id>, write marker.
+#   - Otherwise: create <repo>/.sandbox/worktrees/wt-<session>, a branch
+#     wt-<session> (full session id, sanitized), write marker.
 #   - Echoes the absolute sandbox path to stdout on success.
 #
 # Exit:
@@ -33,7 +33,7 @@ usage() { printf 'usage: sandbox-init.sh --repo <dir> --session <id> [--base <br
 
 REPO=""; SESSION=""; BASE=""
 WT_DIR=".sandbox/worktrees"
-BR_PREFIX="sandbox-session"
+BR_PREFIX="wt"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)           REPO="$2"; shift 2 ;;
@@ -66,8 +66,8 @@ case "$CURRENT" in main|master) ;; *) exit 0 ;; esac
 
 [ -z "$BASE" ] && BASE=$(sb_main_branch "$GIT_ROOT")
 
-SHORT=$(printf '%s' "$SESSION" | tr -c 'a-zA-Z0-9-' '-' | cut -c1-16)
-WT_BRANCH="$BR_PREFIX-$SHORT"
+SAFE=$(printf '%s' "$SESSION" | tr -c 'a-zA-Z0-9-' '-')
+WT_BRANCH="$BR_PREFIX-$SAFE"
 WT_PATH="$GIT_ROOT/$WT_DIR/$WT_BRANCH"
 
 MARKER="$GIT_COMMON/sandbox-markers/$SESSION"

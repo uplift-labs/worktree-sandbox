@@ -19,12 +19,12 @@ OUT=$(printf '%s' "$INPUT" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/cla
 ec=$?
 assert_exit "session-start exits 0" 0 "$ec"
 assert_contains "banner has sandbox prefix" "\[sandbox\]" "$OUT"
-assert_contains "banner shows path" "sandbox-session" "$OUT"
-assert_dir_exists "sandbox dir exists" "$REPO/.sandbox/worktrees/sandbox-session-$SESSION"
+assert_contains "banner shows path" "wt-" "$OUT"
+assert_dir_exists "sandbox dir exists" "$REPO/.sandbox/worktrees/wt-$SESSION"
 assert_file_exists "marker written" "$REPO/.git/sandbox-markers/$SESSION"
 
 echo "== pre-edit: file in sandbox is allowed (silent exit 0) =="
-SB_PATH=$(ls -d "$REPO/.sandbox/worktrees/sandbox-session-$SESSION")
+SB_PATH=$(ls -d "$REPO/.sandbox/worktrees/wt-$SESSION")
 ALLOW_IN=$(printf '{"session_id":"%s","file_path":"%s/x.txt"}' "$SESSION" "$SB_PATH")
 OUT=$(printf '%s' "$ALLOW_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/pre-edit.sh" 2>&1)
 ec=$?

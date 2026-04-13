@@ -30,9 +30,9 @@ LIFECYCLE="$ROOT/core/cmd/sandbox-lifecycle.sh"
 # Bootstrap: start a session.
 START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$SESSION")
 printf '%s' "$START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
-SB_PATH="$REPO/.sandbox/worktrees/sandbox-session-$SESSION"
+SB_PATH="$REPO/.sandbox/worktrees/wt-$SESSION"
 MARKER="$REPO/.git/sandbox-markers/$SESSION"
-BRANCH="sandbox-session-$SESSION"
+BRANCH="wt-$SESSION"
 assert_dir_exists "sandbox created" "$SB_PATH"
 
 echo "== multi-turn: Stop heartbeat keeps sandbox alive across turns =="
@@ -66,7 +66,7 @@ echo "== SessionEnd reason=clear on empty session self-reaps =="
 CLR_SESSION="t09-clear-empty"
 CLR_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$CLR_SESSION")
 printf '%s' "$CLR_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
-CLR_SB="$REPO/.sandbox/worktrees/sandbox-session-$CLR_SESSION"
+CLR_SB="$REPO/.sandbox/worktrees/wt-$CLR_SESSION"
 CLR_MARKER="$REPO/.git/sandbox-markers/$CLR_SESSION"
 assert_dir_exists "clear-empty sandbox created" "$CLR_SB"
 assert_file_exists "clear-empty marker created" "$CLR_MARKER"
@@ -146,9 +146,9 @@ echo "== SessionEnd fast-path: merged+clean branch self-reaps within the same ho
 FP_SESSION="t09-fp1"
 FP_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$FP_SESSION")
 printf '%s' "$FP_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
-FP_SB="$REPO/.sandbox/worktrees/sandbox-session-$FP_SESSION"
+FP_SB="$REPO/.sandbox/worktrees/wt-$FP_SESSION"
 FP_MARKER="$REPO/.git/sandbox-markers/$FP_SESSION"
-FP_BRANCH="sandbox-session-$FP_SESSION"
+FP_BRANCH="wt-$FP_SESSION"
 assert_dir_exists "fast-path sandbox created" "$FP_SB"
 assert_file_exists "fast-path marker created" "$FP_MARKER"
 # Real work + merge it into main, so branch becomes an ancestor of main.
@@ -172,7 +172,7 @@ echo "== SessionEnd fast-path: empty session (no commits) self-reaps its worktre
 EMPTY_SESSION="t09-empty"
 EMPTY_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$EMPTY_SESSION")
 printf '%s' "$EMPTY_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
-EMPTY_SB="$REPO/.sandbox/worktrees/sandbox-session-$EMPTY_SESSION"
+EMPTY_SB="$REPO/.sandbox/worktrees/wt-$EMPTY_SESSION"
 EMPTY_MARKER="$REPO/.git/sandbox-markers/$EMPTY_SESSION"
 assert_dir_exists "empty sandbox created" "$EMPTY_SB"
 assert_file_exists "empty sandbox marker created" "$EMPTY_MARKER"
@@ -193,7 +193,7 @@ echo "== SessionEnd fast-path: unmerged branch keeps marker (safety-net) =="
 FP2_SESSION="t09-fp2"
 FP2_START_IN=$(printf '{"session_id":"%s","source":"startup"}' "$FP2_SESSION")
 printf '%s' "$FP2_START_IN" | CLAUDE_PROJECT_DIR="$REPO" bash "$ROOT/adapters/claude-code/hooks/session-start.sh" >/dev/null 2>&1
-FP2_SB="$REPO/.sandbox/worktrees/sandbox-session-$FP2_SESSION"
+FP2_SB="$REPO/.sandbox/worktrees/wt-$FP2_SESSION"
 FP2_MARKER="$REPO/.git/sandbox-markers/$FP2_SESSION"
 echo "fp2-payload" > "$FP2_SB/fp2.txt"
 (cd "$FP2_SB" && git add fp2.txt && git commit -q -m "feat: fp2 payload")
