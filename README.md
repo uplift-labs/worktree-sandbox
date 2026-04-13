@@ -22,7 +22,7 @@ That's it. Your repo now has sandbox isolation. Every session gets its own workt
 ```bash
 # Create a sandbox (from main)
 bash .sandbox/core/cmd/sandbox-init.sh --repo "$PWD" --session demo
-cd .sandbox/worktrees/sandbox-session-demo
+cd .sandbox/worktrees/wt-demo
 
 # Work freely
 echo "hello" > feature.txt
@@ -30,7 +30,7 @@ git add feature.txt && git commit -m "feat: add feature"
 
 # Merge back (pre-merge-commit hook validates cleanliness)
 cd /path/to/repo
-git merge sandbox-session-demo
+git merge wt-demo
 
 # Clean up (automatic on next session start, or manual)
 bash .sandbox/core/cmd/sandbox-lifecycle.sh --repo "$PWD"
@@ -53,7 +53,7 @@ These aren't theoretical — they happen in every team that gives an AI agent wr
 The tool creates a disposable **git worktree** for each session, enforces a **merge gate** before anything reaches `main`, and runs **automatic cleanup** of everything that's no longer needed.
 
 ```
-main (protected)          sandbox-session-abc123 (worktree)
+main (protected)          wt-abc123… (worktree)
 │                         │
 │  ┌─── merge gate ───┐   │  AI works here freely
 │  │ uncommitted work? │◄─┤  - edits, commits, experiments
@@ -195,7 +195,7 @@ Windows can't guarantee SIGHUP delivery. Sessions can be killed by OOM, power lo
 2. **TTL reclaim** — delete markers whose mtime exceeds TTL. Sessions that never committed get an extended 5-minute TTL to protect live sessions with dead heartbeats.
 3. **Proactive release** — drop markers for sandboxes already merged+clean, even if TTL hasn't expired.
 4. **Clean merged worktrees** — remove worktrees whose branch is an ancestor of main and has no uncommitted work. Marker-protected branches are skipped.
-5. **Orphan branch sweep** — delete `sandbox-session-*` branches that no worktree references and are ancestors of main.
+5. **Orphan branch sweep** — delete `wt-*` branches that no worktree references and are ancestors of main.
 6. **Residual dir sweep** — remove empty worktree directories.
 
 ### What happens in each scenario

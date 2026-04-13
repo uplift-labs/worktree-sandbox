@@ -12,7 +12,7 @@
 #   drops the observed end-to-end delivery rate to near zero.
 #
 # Strategy:
-#   For every sandbox-session-* worktree, scan its $REFL_REL directory
+#   For every wt-* worktree, scan its $REFL_REL directory
 #   for .md files. For each file:
 #     - If the same basename already exists in main, remove it from the
 #       worktree (main already has the authoritative copy).
@@ -75,7 +75,7 @@ mkdir -p "$MAIN_REFL_DIR" 2>/dev/null || exit 0
 RESCUED=0
 DEDUPED=0
 
-for WT in "$WT_DIR"/sandbox-session-*; do
+for WT in "$WT_DIR"/wt-*; do
   [ -d "$WT" ] || continue
   SRC_DIR="$WT/$REFL_REL"
   [ -d "$SRC_DIR" ] || continue

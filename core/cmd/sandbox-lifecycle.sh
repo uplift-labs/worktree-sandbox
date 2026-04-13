@@ -7,7 +7,7 @@
 # Contract:
 #   --repo           main repo path
 #   --ttl            marker TTL for stale-reclaim (default 5)
-#   --branch-prefix  glob for orphan branch sweep (default 'sandbox-session-*')
+#   --branch-prefix  glob for orphan branch sweep (default 'wt-*')
 #
 # Phases:
 #   1. git worktree prune (stale metadata)
@@ -126,7 +126,7 @@ _sb_kill_dead_heartbeat() {
   return 2  # heartbeat existed, session confirmed dead
 }
 
-REPO=""; TTL=5; PREFIX="sandbox-session-*"; WT_DIR=".sandbox/worktrees"
+REPO=""; TTL=5; PREFIX="wt-*"; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)          REPO="$2"; shift 2 ;;

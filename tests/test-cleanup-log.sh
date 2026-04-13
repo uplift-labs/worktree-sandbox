@@ -29,14 +29,14 @@ _assert() {
 # --- happy path: writes one line with expected fields ---
 ROOT1="$_tmpdir/root1"
 mkdir -p "$ROOT1"
-sb_cleanup_log "$ROOT1" "DESTROY" "sess-abc" "sandbox-session-xyz" "test-reason"
+sb_cleanup_log "$ROOT1" "DESTROY" "sess-abc" "wt-xyz" "test-reason"
 _day=$(date -u +%Y-%m-%d)
 _file="$ROOT1/logs/cleanup-$_day.log"
 
 [ -f "$_file" ] && rc=0 || rc=1
 _assert "happy path: log file created under logs/" "$rc"
 
-grep -q "DESTROY session=sess-abc branch=sandbox-session-xyz reason=test-reason" "$_file" 2>/dev/null \
+grep -q "DESTROY session=sess-abc branch=wt-xyz reason=test-reason" "$_file" 2>/dev/null \
   && rc=0 || rc=1
 _assert "happy path: line contains action session= branch= reason=" "$rc"
 
