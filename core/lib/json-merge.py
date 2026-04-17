@@ -11,7 +11,8 @@ import json
 import sys
 from pathlib import Path
 
-MARKER = ".sandbox/adapter/hooks/"
+MARKER = "/sandbox/adapter/hooks/"
+LEGACY_MARKERS = [".sandbox/adapter/hooks/"]
 
 
 def hook_key(hook):
@@ -25,7 +26,10 @@ def hook_key(hook):
 
 def is_sandbox_hook(hook):
     """Check if a hook was installed by sandbox."""
-    return MARKER in hook.get("command", "")
+    cmd = hook.get("command", "")
+    if MARKER in cmd:
+        return True
+    return any(m in cmd for m in LEGACY_MARKERS)
 
 
 def merge_matcher_group(existing_group, new_group):
