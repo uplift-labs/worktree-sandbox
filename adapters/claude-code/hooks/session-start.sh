@@ -13,13 +13,18 @@ CI_NOOP=0
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTER_DIR="$(cd "$HOOK_DIR/.." && pwd)"
-ROOT="$(cd "$ADAPTER_DIR/../.." && pwd)"
 . "$ADAPTER_DIR/lib/json-field.sh"
+. "$ADAPTER_DIR/lib/layout.sh"
+ROOT=$(sandbox_adapter_root "$ADAPTER_DIR")
+. "$ROOT/core/lib/git-context.sh"
 
 INPUT=$(cat)
 SESSION=$(json_field "session_id" "$INPUT")
 SOURCE=$(json_field "source" "$INPUT")
 REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+WT_DIR=$(sandbox_adapter_worktrees_dir "$REPO" "$ROOT")
+BR_PREFIX=$(sandbox_adapter_branch_prefix)
+BR_GLOB=$(sandbox_adapter_branch_glob)
 
 [ -z "$SESSION" ] && exit 0
 
@@ -81,12 +86,14 @@ _launch_heartbeat() {
     ( bash "$ROOT/core/lib/heartbeat.sh" \
         --pid 0 --marker "$_marker" \
         --repo "$REPO" --sandbox-root "$ROOT" \
+        --worktrees-dir "$WT_DIR" --branch-prefix "$BR_GLOB" \
         ${_winpid:+--parent-winpid "$_winpid"} \
         </dev/null >/dev/null 2>&1 & )
   else
     nohup bash "$ROOT/core/lib/heartbeat.sh" \
       --pid "$PPID" --marker "$_marker" \
       --repo "$REPO" --sandbox-root "$ROOT" \
+      --worktrees-dir "$WT_DIR" --branch-prefix "$BR_GLOB" \
       </dev/null >/dev/null 2>&1 &
     disown 2>/dev/null || true
   fi
@@ -94,11 +101,12 @@ _launch_heartbeat() {
 
 # Suppress creation on compact restart — just re-emit the banner for existing sandbox
 if [ "$SOURCE" = "compact" ]; then
-  MARKERS_DIR="$REPO/.git/sandbox-markers"
+  GIT_COMMON=$(sb_git_common_dir "$REPO") || exit 0
+  MARKERS_DIR="$GIT_COMMON/sandbox-markers"
   if [ -f "$MARKERS_DIR/$SESSION" ]; then
     BR=$(awk '{print $1}' "$MARKERS_DIR/$SESSION" 2>/dev/null)
-    if [ -n "$BR" ] && [ -d "$REPO/.sandbox/worktrees/$BR" ]; then
-      printf '[sandbox] Sandbox (re-injected): %s/.sandbox/worktrees/%s — use this root for all file ops.\n' "$REPO" "$BR"
+    if [ -n "$BR" ] && [ -d "$REPO/$WT_DIR/$BR" ]; then
+      printf '[sandbox] Sandbox (re-injected): %s/%s/%s — use this root for all file ops.\n' "$REPO" "$WT_DIR" "$BR"
       # Re-launch heartbeat — previous one died with the old process.
       _launch_heartbeat "$MARKERS_DIR/$SESSION"
     fi
@@ -107,15 +115,23 @@ if [ "$SOURCE" = "compact" ]; then
 fi
 
 # Run lifecycle first (cleans old state before claiming new sandbox)
-LC_OUT=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" 2>/dev/null || true)
+LC_OUT=$(bash "$ROOT/core/cmd/sandbox-lifecycle.sh" \
+  --repo "$REPO" \
+  --worktrees-dir "$WT_DIR" \
+  --branch-prefix "$BR_GLOB" 2>/dev/null || true)
 [ -n "$LC_OUT" ] && printf '[sandbox] %s\n' "$LC_OUT"
 
 # Then create this session's sandbox
-if SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION" 2>&1) && [ -n "$SB" ]; then
+if SB=$(bash "$ROOT/core/cmd/sandbox-init.sh" \
+    --repo "$REPO" \
+    --session "$SESSION" \
+    --worktrees-dir "$WT_DIR" \
+    --branch-prefix "$BR_PREFIX" 2>&1) && [ -n "$SB" ]; then
   printf '[sandbox] Sandbox: %s — use this root for all file ops.\n' "$SB"
 
   # Launch heartbeat — keeps marker fresh while Claude Code is alive.
-  _launch_heartbeat "$REPO/.git/sandbox-markers/$SESSION"
+  GIT_COMMON=$(sb_git_common_dir "$REPO") || exit 0
+  _launch_heartbeat "$GIT_COMMON/sandbox-markers/$SESSION"
 else
   # Surface sandbox creation failure. Without this banner the failure is
   # silent — the session runs in the main repo thinking it has isolation

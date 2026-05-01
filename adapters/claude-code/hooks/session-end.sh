@@ -26,14 +26,17 @@ set -u
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTER_DIR="$(cd "$HOOK_DIR/.." && pwd)"
-ROOT="$(cd "$ADAPTER_DIR/../.." && pwd)"
 . "$ADAPTER_DIR/lib/json-field.sh"
+. "$ADAPTER_DIR/lib/layout.sh"
+ROOT=$(sandbox_adapter_root "$ADAPTER_DIR")
 . "$ROOT/core/lib/git-context.sh"
 
 INPUT=$(cat)
 SESSION=$(json_field "session_id" "$INPUT")
 REASON=$(json_field "reason" "$INPUT")
 REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+WT_DIR=$(sandbox_adapter_worktrees_dir "$REPO" "$ROOT")
+BR_GLOB=$(sandbox_adapter_branch_glob)
 
 [ -z "$SESSION" ] && exit 0
 
@@ -60,6 +63,11 @@ if [ -f "${MARKER}.hb" ]; then
 fi
 
 # Delegate cleanup to core (capture-commit + self-release + lifecycle).
-bash "$ROOT/core/cmd/sandbox-cleanup.sh" --repo "$REPO" --session "$SESSION" --trust-dead
+bash "$ROOT/core/cmd/sandbox-cleanup.sh" \
+  --repo "$REPO" \
+  --session "$SESSION" \
+  --trust-dead \
+  --worktrees-dir "$WT_DIR" \
+  --branch-prefix "$BR_GLOB"
 
 exit 0

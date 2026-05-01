@@ -2,7 +2,7 @@
 # sandbox-guard.sh — path gate: is an edit allowed?
 #
 # Usage:
-#   sandbox-guard.sh --session <id> --file <path> [--repo <dir>]
+#   sandbox-guard.sh --session <id> --file <path> [--repo <dir>] [--worktrees-dir <rel>]
 #
 # Contract:
 #   --session  session id (used to locate marker)
@@ -32,14 +32,15 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/git-context.sh"
 . "$ROOT/core/lib/ttl-marker.sh"
 
-usage() { printf 'usage: sandbox-guard.sh --session <id> --file <path> [--repo <dir>]\n' >&2; exit 2; }
+usage() { printf 'usage: sandbox-guard.sh --session <id> --file <path> [--repo <dir>] [--worktrees-dir <rel>]\n' >&2; exit 2; }
 
-SESSION=""; FILE=""; REPO=""
+SESSION=""; FILE=""; REPO=""; WT_DIR=".sandbox/worktrees"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --session) SESSION="$2"; shift 2 ;;
-    --file)    FILE="$2"; shift 2 ;;
-    --repo)    REPO="$2"; shift 2 ;;
+    --session)       SESSION="$2"; shift 2 ;;
+    --file)          FILE="$2"; shift 2 ;;
+    --repo)          REPO="$2"; shift 2 ;;
+    --worktrees-dir) WT_DIR="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; usage ;;
   esac
@@ -72,7 +73,7 @@ MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 WT_BRANCH=$(sb_marker_read_value "$MARKER")
 [ -z "$WT_BRANCH" ] && exit 0
 
-SB_PATH="$REPO_ROOT/.sandbox/worktrees/$WT_BRANCH"
+SB_PATH="$REPO_ROOT/$WT_DIR/$WT_BRANCH"
 
 nf=$(_norm "$FILE")
 nr=$(_norm "$REPO_ROOT")

@@ -29,6 +29,8 @@
 #                      [--interval <seconds>] [--max-age <seconds>] \
 #                      [--parent-winpid <windows-pid>] \
 #                      [--repo <dir>] [--sandbox-root <dir>]
+#                      [--worktrees-dir <rel>] [--branch-prefix <glob>]
+#                      [--owner-process-names <name[,name...]>]
 #
 # Sidecar file:
 #   Writes "<heartbeat_pid> <parent_winpid|0> <monitored_pid|0>" to
@@ -63,6 +65,9 @@ MAX_AGE=86400   # 24 hours — safety valve for marker-only mode
 PARENT_WINPID=""
 REPO=""
 SANDBOX_ROOT=""
+WT_DIR=".sandbox/worktrees"
+BR_PREFIX="wt-*"
+OWNER_PROCESS_NAMES="claude.exe,claude-code.exe,claude-desktop.exe"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -73,6 +78,9 @@ while [ $# -gt 0 ]; do
     --parent-winpid)  PARENT_WINPID="$2";  shift 2 ;;
     --repo)           REPO="$2";           shift 2 ;;
     --sandbox-root)   SANDBOX_ROOT="$2";   shift 2 ;;
+    --worktrees-dir)  WT_DIR="$2";         shift 2 ;;
+    --branch-prefix)  BR_PREFIX="$2";      shift 2 ;;
+    --owner-process-names) OWNER_PROCESS_NAMES="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -184,11 +192,19 @@ if [ "$_parent_died" = 1 ] && [ -n "$SANDBOX_ROOT" ] && [ -n "$REPO" ]; then
   # user session — a strictly safer failure mode.
   _skip_cleanup=0
   if [ "$_is_msys" = 1 ] && command -v tasklist >/dev/null 2>&1; then
-    if tasklist /FI "IMAGENAME eq claude.exe" /NH 2>/dev/null | grep -qi 'claude\.exe' \
-       || tasklist /FI "IMAGENAME eq claude-code.exe" /NH 2>/dev/null | grep -qi 'claude-code\.exe' \
-       || tasklist /FI "IMAGENAME eq claude-desktop.exe" /NH 2>/dev/null | grep -qi 'claude-desktop\.exe'; then
-      _skip_cleanup=1
-    fi
+    _old_ifs="$IFS"
+    IFS=','
+    for _owner_name in $OWNER_PROCESS_NAMES; do
+      IFS="$_old_ifs"
+      _owner_name=$(printf '%s' "$_owner_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      [ -z "$_owner_name" ] && continue
+      if tasklist /FI "IMAGENAME eq $_owner_name" /NH 2>/dev/null | grep -qi "$_owner_name"; then
+        _skip_cleanup=1
+        break
+      fi
+      IFS=','
+    done
+    IFS="$_old_ifs"
   fi
 
   if [ "$_skip_cleanup" = 1 ]; then
@@ -202,7 +218,8 @@ if [ "$_parent_died" = 1 ] && [ -n "$SANDBOX_ROOT" ] && [ -n "$REPO" ]; then
 
   sb_cleanup_log "$SANDBOX_ROOT" "DESTROY" "$_session" "-" "heartbeat-parent-death"
   if bash "$SANDBOX_ROOT/core/cmd/sandbox-cleanup.sh" \
-       --repo "$REPO" --session "$_session" 2>/dev/null; then
+       --repo "$REPO" --session "$_session" \
+       --worktrees-dir "$WT_DIR" --branch-prefix "$BR_PREFIX" 2>/dev/null; then
     _cleanup_ran=1
   fi
 fi

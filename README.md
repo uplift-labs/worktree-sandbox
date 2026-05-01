@@ -4,14 +4,21 @@
 
 > **This is a personal pet project. Use at your own risk.**
 
-Git worktree isolation and automatic cleanup for AI-assisted development sessions. Keeps `main` untouched. Cleans up after itself. Zero dependencies beyond `bash` and `git`.
+Git worktree isolation and automatic cleanup for AI-assisted development sessions. Keeps `main` untouched. Cleans up after itself. Core runtime has zero dependencies beyond `bash` and `git`.
 
 ## Quickstart
 
-Install into your project with Claude Code
+Install into your project with Claude Code:
 
 ```bash
 bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-claude-code
+```
+
+Or install for Codex CLI:
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-codex
+bash .uplift/sandbox/adapters/codex/bin/codex-sandbox.sh
 ```
 
 That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
@@ -21,8 +28,11 @@ That's it. Your repo now has sandbox isolation. Every session gets its own workt
 
 ```bash
 # Create a sandbox (from main)
-bash .sandbox/core/cmd/sandbox-init.sh --repo "$PWD" --session demo
-cd .sandbox/worktrees/wt-demo
+bash .uplift/sandbox/core/cmd/sandbox-init.sh \
+  --repo "$PWD" \
+  --session demo \
+  --worktrees-dir .uplift/sandbox/worktrees
+cd .uplift/sandbox/worktrees/wt-demo
 
 # Work freely
 echo "hello" > feature.txt
@@ -33,7 +43,9 @@ cd /path/to/repo
 git merge wt-demo
 
 # Clean up (automatic on next session start, or manual)
-bash .sandbox/core/cmd/sandbox-lifecycle.sh --repo "$PWD"
+bash .uplift/sandbox/core/cmd/sandbox-lifecycle.sh \
+  --repo "$PWD" \
+  --worktrees-dir .uplift/sandbox/worktrees
 ```
 
 </details>
@@ -44,7 +56,7 @@ AI coding assistants (Claude Code, Cursor, Copilot Workspace, etc.) operate insi
 
 1. **Main branch contamination.** The assistant edits files directly on `main`, leaving half-finished work in the primary branch. A careless `git push` ships broken code. Reverting requires manual archaeology through uncommitted changes, staged hunks, and new files.
 
-2. **Abandoned state accumulates.** Every crashed session, lost connection, or force-quit leaves behind stale worktrees, orphan branches, and marker files. After a few weeks of active use, `git branch` returns dozens of dead `session-*` branches, and `.sandbox/worktrees/` is full of directories nobody remembers.
+2. **Abandoned state accumulates.** Every crashed session, lost connection, or force-quit leaves behind stale worktrees, orphan branches, and marker files. After a few weeks of active use, `git branch` returns dozens of dead `session-*` branches, and sandbox worktree directories are full of state nobody remembers.
 
 These aren't theoretical — they happen in every team that gives an AI agent write access to a real repo.
 
@@ -86,7 +98,8 @@ worktree-sandbox/
 │   └── lib/         ← internal helpers (not public API)
 │       └── json-merge.py  ← idempotent settings.json merger
 ├── adapters/
-│   └── claude-code/ ← host-specific translation layer
+│   ├── claude-code/ ← Claude Code hook translation layer
+│   └── codex/       ← Codex hook wrappers + launcher
 └── install.sh
 ```
 
@@ -100,7 +113,7 @@ worktree-sandbox/
 State lives in two places, both TTL-managed:
 
 1. **Markers** — one small file per session at `<git-common-dir>/sandbox-markers/<session-id>`. Contains branch name, creation epoch, and initial HEAD. A background **heartbeat** process touches the marker every second while the session is alive.
-2. **Worktrees** — at `<repo>/.sandbox/worktrees/<branch-name>`. Standard git worktrees, created by `sandbox-init`, cleaned by `sandbox-lifecycle`.
+2. **Worktrees** — by default at `<repo>/.sandbox/worktrees/<branch-name>` when running from the source tree; installed adapters pass `<repo>/.uplift/sandbox/worktrees/<branch-name>`. Standard git worktrees, created by `sandbox-init`, cleaned by `sandbox-lifecycle`.
 
 ### Fail-open policy
 
@@ -119,11 +132,12 @@ bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/
 ```bash
 git clone https://github.com/uplift-labs/worktree-sandbox
 bash worktree-sandbox/install.sh --with-claude-code
+bash worktree-sandbox/install.sh --with-codex
 ```
 
-Installs `core/` to `.sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks. With `--with-claude-code`, the adapter goes to `.sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`).
+Installs `core/` to `.uplift/sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks, and ignores only `.uplift/sandbox/worktrees/`. With `--with-claude-code`, the adapter goes to `.uplift/sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`). With `--with-codex`, the adapter goes to `.uplift/sandbox/adapters/codex/`, hooks are merged into `.codex/hooks.json`, and `features.codex_hooks = true` is enabled in `.codex/config.toml`.
 
-Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.sandbox/` on every merge.
+Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.uplift/sandbox/` on every merge and preserves installed adapter flags.
 
 ## CLI reference
 
@@ -150,6 +164,19 @@ The Claude Code adapter (`adapters/claude-code/`) wires four hooks:
 | **Stop** | Per-turn heartbeat: touches marker so lifecycle treats session as live. No merge, no cleanup, no blocking. |
 | **SessionEnd** | On real exit: kills heartbeat, capture-commits pending work, runs lifecycle. On `/clear` or `/compact`: heartbeat only. Never merges — that's the user's choice. |
 
+### Codex CLI
+
+The Codex adapter (`adapters/codex/`) has a recommended launcher plus lifecycle hooks:
+
+| Component | What it does |
+|---|---|
+| `codex-sandbox.sh` | Creates the sandbox before Codex starts, runs `codex -C <sandbox>`, exports `CODEX_SANDBOX_*` env vars for hooks, and calls cleanup when Codex exits. |
+| **SessionStart** | Runs lifecycle, creates a sandbox in hook-only mode, or reinforces the launcher-created sandbox via additional context. |
+| **PreToolUse** | Blocks supported write tools, including `apply_patch`, when they run from the main repo while the session owns a sandbox. |
+| **Stop** | Returns Codex `{"continue":true}` and refreshes marker mtime. |
+
+Codex currently has no `SessionEnd` hook equivalent to Claude Code. Use the launcher for the strongest guarantee; hook-only mode is a fallback that adds context and blocks supported write tools but cannot change Codex's process cwd after startup.
+
 ### Git hooks
 
 Installed automatically by `install.sh`:
@@ -157,7 +184,7 @@ Installed automatically by `install.sh`:
 | Hook | Purpose |
 |---|---|
 | `pre-merge-commit` | Blocks merge if the sandbox worktree has tracked modifications or untracked files. |
-| `post-merge` | Re-runs `install.sh` in background after every merge to keep `.sandbox/` in sync. |
+| `post-merge` | Re-runs `install.sh` in background after every merge to keep `.uplift/sandbox/` in sync. |
 
 ### Writing a new adapter
 
@@ -179,7 +206,7 @@ A sandbox goes through a predictable lifecycle. Understanding it prevents subtle
 
 ### Phase C — Session end
 
-`session-end.sh` runs on termination (`/exit`, Ctrl+C/D, terminal close, logout). On real exit: (1) kill heartbeat, (2) stage + commit pending work, (3) run lifecycle. On `/clear` or `/compact`: heartbeat only.
+For Claude Code, `session-end.sh` runs on termination (`/exit`, Ctrl+C/D, terminal close, logout). On real exit: (1) kill heartbeat, (2) stage + commit pending work, (3) run lifecycle. On `/clear` or `/compact`: heartbeat only. For Codex CLI, `codex-sandbox.sh` performs the equivalent cleanup when the launched `codex` process exits.
 
 **SessionEnd never merges into main.** The user merges when ready.
 
@@ -221,7 +248,7 @@ bash tests/run.sh e2e           # e2e only
 bash tests/run.sh tests/e2e/t01-happy-path.sh   # single file
 ```
 
-26 test files (7 unit + 19 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
+30 test files (9 unit + 21 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
 
 ## Platform support
 

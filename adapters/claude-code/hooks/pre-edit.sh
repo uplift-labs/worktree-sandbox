@@ -8,18 +8,24 @@ set -u
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 ADAPTER_DIR="$(cd "$HOOK_DIR/.." && pwd)"
-ROOT="$(cd "$ADAPTER_DIR/../.." && pwd)"
 . "$ADAPTER_DIR/lib/json-field.sh"
+. "$ADAPTER_DIR/lib/layout.sh"
+ROOT=$(sandbox_adapter_root "$ADAPTER_DIR")
 
 INPUT=$(cat)
 SESSION=$(json_field "session_id" "$INPUT")
 FILE=$(json_field "file_path" "$INPUT")
 REPO="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+WT_DIR=$(sandbox_adapter_worktrees_dir "$REPO" "$ROOT")
 
 [ -z "$SESSION" ] && exit 0
 [ -z "$FILE" ] && exit 0
 
-if reason=$(bash "$ROOT/core/cmd/sandbox-guard.sh" --session "$SESSION" --file "$FILE" --repo "$REPO" 2>&1); then
+if reason=$(bash "$ROOT/core/cmd/sandbox-guard.sh" \
+    --session "$SESSION" \
+    --file "$FILE" \
+    --repo "$REPO" \
+    --worktrees-dir "$WT_DIR" 2>&1); then
   exit 0
 fi
 
