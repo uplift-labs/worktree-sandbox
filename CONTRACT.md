@@ -200,12 +200,26 @@ Code. Cleanup therefore relies on the launcher exit path plus heartbeat/TTL
 safety nets. Hook-only mode is useful as a fallback, but the launcher is the
 stronger guarantee because it changes Codex's working root to the sandbox.
 
+## Adapter responsibilities (OpenCode)
+
+OpenCode support is launcher-first with a project plugin for defense-in-depth:
+
+| Component | Role |
+|-----------|------|
+| `opencode-sandbox.sh` launcher | Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars for the plugin and shell tools, launches heartbeat, and calls `sandbox-cleanup.sh --trust-dead` when OpenCode exits. This is the recommended enforcement path. |
+| OpenCode plugin | Injects system context, propagates sandbox env vars via `shell.env`, and blocks supported write tools from targeting the main repo while the session owns a sandbox. |
+
+The plugin must not be the primary isolation mechanism: OpenCode plugins can
+observe and guard tool calls, but they cannot reliably move an already-started
+OpenCode process into a sandbox worktree. Cleanup relies on the launcher exit
+path plus heartbeat/TTL safety nets.
+
 ## Git hooks installed by `install.sh`
 
 | Hook               | Purpose                                                        |
 |--------------------|----------------------------------------------------------------|
 | `pre-merge-commit` | Gates sandbox merges via `sandbox-merge-gate` — validates worktree cleanliness of the branch being merged. |
-| `post-merge`       | Re-runs `install.sh` after every merge so installed sandbox scripts stay in sync with source. Runs in background; fail-open. Auto-detects installed Claude Code and Codex adapters and preserves the matching flags. |
+| `post-merge`       | Re-runs `install.sh` after every merge so installed sandbox scripts stay in sync with source. Runs in background; fail-open. Auto-detects installed Claude Code, Codex, and OpenCode adapters and preserves the matching flags. |
 
 ## Library functions
 

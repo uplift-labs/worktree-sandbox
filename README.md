@@ -21,6 +21,13 @@ bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/
 bash .uplift/sandbox/adapters/codex/bin/codex-sandbox.sh
 ```
 
+Or install for OpenCode:
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-opencode
+bash .uplift/sandbox/adapters/opencode/bin/opencode-sandbox.sh
+```
+
 That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
 
 <details>
@@ -99,7 +106,8 @@ worktree-sandbox/
 │       └── json-merge.py  ← idempotent settings.json merger
 ├── adapters/
 │   ├── claude-code/ ← Claude Code hook translation layer
-│   └── codex/       ← Codex hook wrappers + launcher
+│   ├── codex/       ← Codex hook wrappers + launcher
+│   └── opencode/    ← OpenCode launcher + plugin
 └── install.sh
 ```
 
@@ -133,9 +141,10 @@ bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/
 git clone https://github.com/uplift-labs/worktree-sandbox
 bash worktree-sandbox/install.sh --with-claude-code
 bash worktree-sandbox/install.sh --with-codex
+bash worktree-sandbox/install.sh --with-opencode
 ```
 
-Installs `core/` to `.uplift/sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks, and ignores only `.uplift/sandbox/worktrees/`. With `--with-claude-code`, the adapter goes to `.uplift/sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`). With `--with-codex`, the adapter goes to `.uplift/sandbox/adapters/codex/`, hooks are merged into `.codex/hooks.json`, and `features.codex_hooks = true` is enabled in `.codex/config.toml`.
+Installs `core/` to `.uplift/sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks, and ignores only `.uplift/sandbox/worktrees/`. With `--with-claude-code`, the adapter goes to `.uplift/sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`). With `--with-codex`, the adapter goes to `.uplift/sandbox/adapters/codex/`, hooks are merged into `.codex/hooks.json`, and `features.codex_hooks = true` is enabled in `.codex/config.toml`. With `--with-opencode`, the adapter goes to `.uplift/sandbox/adapters/opencode/` and a project-local plugin is written to `.opencode/plugins/worktree-sandbox.js`.
 
 Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.uplift/sandbox/` on every merge and preserves installed adapter flags.
 
@@ -176,6 +185,17 @@ The Codex adapter (`adapters/codex/`) has a recommended launcher plus lifecycle 
 | **Stop** | Returns Codex `{"continue":true}` and refreshes marker mtime. |
 
 Codex currently has no `SessionEnd` hook equivalent to Claude Code. Use the launcher for the strongest guarantee; hook-only mode is a fallback that adds context and blocks supported write tools but cannot change Codex's process cwd after startup.
+
+### OpenCode
+
+The OpenCode adapter (`adapters/opencode/`) is launcher-first:
+
+| Component | What it does |
+|---|---|
+| `opencode-sandbox.sh` | Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars, launches heartbeat, and calls cleanup when OpenCode exits. |
+| Plugin | Adds system context, passes sandbox env vars to shell tools, and blocks supported write tools when they target the main repo while the session owns a sandbox. |
+
+Use the launcher for the strongest guarantee. The plugin is defense-in-depth; it cannot relocate an already-started OpenCode process into a different working directory.
 
 ### Git hooks
 
@@ -248,7 +268,7 @@ bash tests/run.sh e2e           # e2e only
 bash tests/run.sh tests/e2e/t01-happy-path.sh   # single file
 ```
 
-30 test files (9 unit + 21 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
+32 test files (9 unit + 23 e2e) covering all core commands and adapter hooks. All tests create real temporary git repos via `mktemp -d` + `git init`. No mocks.
 
 ## Platform support
 
