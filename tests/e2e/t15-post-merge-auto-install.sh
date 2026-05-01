@@ -26,7 +26,7 @@ cp -r "$ROOT/adapters" "$REPO/adapters"
 cp "$ROOT/install.sh" "$REPO/install.sh"
 (cd "$REPO" && git add -A && git commit -q -m "chore: add source tree")
 
-bash "$REPO/install.sh" --target "$REPO" --with-claude-code >/dev/null 2>&1
+bash "$REPO/install.sh" --target "$REPO" --with-claude-code --with-codex >/dev/null 2>&1
 GIT_COMMON=$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null)
 case "$GIT_COMMON" in
   /*|[A-Za-z]:*) ;;
@@ -56,5 +56,6 @@ assert_contains "restored file has shebang" "#!/bin/bash" "$AFTER"
 
 echo "== post-merge detects --with-claude-code from existing adapter dir =="
 assert_file_exists "adapter still present after post-merge" "$REPO/.uplift/sandbox/adapter/hooks/session-start.sh"
+assert_file_exists "codex adapter still present after post-merge" "$REPO/.uplift/sandbox/adapters/codex/hooks/session-start.sh"
 
 test_summary

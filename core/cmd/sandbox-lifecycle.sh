@@ -155,7 +155,7 @@ LINES=""
 # Running before the worktree-reap phases (1-6) also has a useful side-effect:
 # removing the files from the worktree drops one category of "unsaved work"
 # that was blocking reap, so subsequent phases can reclaim the worktree too.
-RESCUE_OUT=$(bash "$ROOT/core/cmd/reflection-rescue.sh" --repo "$GIT_ROOT" 2>/dev/null || true)
+RESCUE_OUT=$(bash "$ROOT/core/cmd/reflection-rescue.sh" --repo "$GIT_ROOT" --worktrees-dir "$WT_DIR" 2>/dev/null || true)
 [ -n "$RESCUE_OUT" ] && LINES="${LINES}${RESCUE_OUT}"$'\n'
 
 # Phase 1: prune stale git worktree metadata

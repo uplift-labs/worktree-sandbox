@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sandbox JSON merge tool.
 
-Merges hook definitions into an existing Claude Code settings.json.
+Merges hook definitions into an existing hooks/settings JSON file.
 Idempotent: running twice produces the same result.
 
 Usage:
@@ -11,7 +11,10 @@ import json
 import sys
 from pathlib import Path
 
-MARKER = "/sandbox/adapter/hooks/"
+MARKERS = [
+    "/sandbox/adapter/hooks/",
+    "/sandbox/adapters/",
+]
 LEGACY_MARKERS = [".sandbox/adapter/hooks/"]
 
 
@@ -27,7 +30,7 @@ def hook_key(hook):
 def is_sandbox_hook(hook):
     """Check if a hook was installed by sandbox."""
     cmd = hook.get("command", "")
-    if MARKER in cmd:
+    if any(marker in cmd for marker in MARKERS):
         return True
     return any(m in cmd for m in LEGACY_MARKERS)
 

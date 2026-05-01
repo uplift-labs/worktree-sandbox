@@ -37,7 +37,9 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
   marker creation), after which the heartbeat is killed as a presumed
   orphan. Legacy single-field `.hb` files (missing fields 2-3) are treated
   as unknown-parent and fall through to the orphan grace path.
-- **Worktree location:** `<repo-root>/.sandbox/worktrees/<branch-name>`.
+- **Worktree location:** default `<repo-root>/.sandbox/worktrees/<branch-name>`.
+  Installed adapters pass their installed layout explicitly, e.g.
+  `<repo-root>/.uplift/sandbox/worktrees/<branch-name>`.
 
 ## Commands
 
@@ -46,7 +48,7 @@ Every script under `core/cmd/` is a stable public entry point. Scripts under
 Create a session sandbox worktree.
 
 ```
-sandbox-init.sh --repo <dir> --session <id> [--base <branch>]
+sandbox-init.sh --repo <dir> --session <id> [--base <branch>] [--worktrees-dir <rel>] [--branch-prefix <prefix>]
 ```
 
 | Flag        | Required | Description                                        |
@@ -54,6 +56,8 @@ sandbox-init.sh --repo <dir> --session <id> [--base <branch>]
 | `--repo`    | yes      | Absolute path to the main repo (must be on main/master) |
 | `--session` | yes      | Unique session identifier (becomes part of branch name) |
 | `--base`    | no       | Base branch to fork from (default: auto-detected)  |
+| `--worktrees-dir` | no | Worktree directory relative to repo root (default `.sandbox/worktrees`) |
+| `--branch-prefix` | no | Branch name prefix (default `wt`) |
 
 **Output:** absolute sandbox path on stdout on success.
 **Exit:** `0` success or no-op (already sandboxed / not on main) / `1` hard
@@ -64,11 +68,15 @@ failure (with message) / `2` bad usage.
 Path gate: decide whether an edit at `<file>` is allowed.
 
 ```
-sandbox-guard.sh --session <id> --file <path> [--repo <dir>]
+sandbox-guard.sh --session <id> --file <path> [--repo <dir>] [--worktrees-dir <rel>]
 ```
 
 **Allow** when: no active sandbox / file inside sandbox / file outside repo.
 **Deny** when: file is inside main repo but outside the session's sandbox.
+
+| Flag              | Required | Default              | Description |
+|-------------------|----------|----------------------|-------------|
+| `--worktrees-dir` | no       | `.sandbox/worktrees` | Worktree directory relative to repo root |
 
 **Exit:** `0` allow / `1` deny (reason on stdout) / `2` bad usage.
 
@@ -77,7 +85,7 @@ sandbox-guard.sh --session <id> --file <path> [--repo <dir>]
 Periodic cleanup. Call from session start, session stop, or a cron job.
 
 ```
-sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>]
+sandbox-lifecycle.sh --repo <dir> [--ttl <seconds>] [--branch-prefix <glob>] [--worktrees-dir <rel>]
 ```
 
 | Flag              | Required | Default               | Description              |
@@ -115,20 +123,22 @@ taken; silent otherwise.
 Session cleanup: capture-commit + self-release + lifecycle.
 
 ```
-sandbox-cleanup.sh --repo <dir> --session <id>
+sandbox-cleanup.sh --repo <dir> --session <id> [--worktrees-dir <rel>] [--branch-prefix <glob>]
 ```
 
-| Flag        | Required | Description                          |
-|-------------|----------|--------------------------------------|
-| `--repo`    | yes      | Main repo path                       |
-| `--session` | yes      | Session identifier (marker filename) |
+| Flag              | Required | Default              | Description |
+|-------------------|----------|----------------------|-------------|
+| `--repo`          | yes      | —                    | Main repo path |
+| `--session`       | yes      | —                    | Session identifier (marker filename) |
+| `--worktrees-dir` | no       | `.sandbox/worktrees` | Worktree directory relative to repo root |
+| `--branch-prefix` | no       | `wt-*`               | Glob for orphan branch sweep |
 
 **Phases:** capture-commit pending work (skipped if merge/rebase in progress
 or HEAD is detached) → self-release marker if branch is merged into main AND
 worktree is clean → invoke `sandbox-lifecycle` for full cleanup pass.
 
-**Callers:** `session-end.sh` (graceful exit, after killing heartbeat) and
-`heartbeat.sh` (parent-death cleanup, when SessionEnd never fired).
+**Callers:** adapter session-end/launcher cleanup paths and `heartbeat.sh`
+(parent-death cleanup when a host-specific end hook never fired).
 
 **Exit:** always `0` (fail-open). Diagnostic output on stderr.
 
@@ -176,12 +186,26 @@ delete such branches manually or rely on the orphan-branch sweep if the
 branch name matches the sandbox prefix and the original commits are in
 `main`.
 
+## Adapter responsibilities (Codex CLI)
+
+Codex support has two modes:
+
+| Mode | Role |
+|------|------|
+| `codex-sandbox.sh` launcher | Creates the sandbox before Codex starts, runs `codex -C <sandbox>`, exports `CODEX_SANDBOX_*` env vars for hooks, and calls `sandbox-cleanup.sh --trust-dead` when Codex exits. This is the recommended enforcement path. |
+| Codex lifecycle hooks | Provide additional context on `SessionStart`, block supported write tools from running in main via `PreToolUse`, and refresh marker mtime via `Stop`. |
+
+Codex currently does not expose a `SessionEnd` hook equivalent to Claude
+Code. Cleanup therefore relies on the launcher exit path plus heartbeat/TTL
+safety nets. Hook-only mode is useful as a fallback, but the launcher is the
+stronger guarantee because it changes Codex's working root to the sandbox.
+
 ## Git hooks installed by `install.sh`
 
 | Hook               | Purpose                                                        |
 |--------------------|----------------------------------------------------------------|
 | `pre-merge-commit` | Gates sandbox merges via `sandbox-merge-gate` — validates worktree cleanliness of the branch being merged. |
-| `post-merge`       | Re-runs `install.sh` after every merge so `.sandbox/` stays in sync with source. Runs in background; fail-open. Auto-detects `--with-claude-code` if adapter is already installed. |
+| `post-merge`       | Re-runs `install.sh` after every merge so installed sandbox scripts stay in sync with source. Runs in background; fail-open. Auto-detects installed Claude Code and Codex adapters and preserves the matching flags. |
 
 ## Library functions
 

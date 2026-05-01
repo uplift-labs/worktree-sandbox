@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/__SANDBOX_PREFIX__/sandbox/adapters/codex/hooks/session-start.sh\"",
+            "statusMessage": "Starting sandbox",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/__SANDBOX_PREFIX__/sandbox/adapters/codex/hooks/pre-tool-use.sh\"",
+            "statusMessage": "Checking sandbox",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/__SANDBOX_PREFIX__/sandbox/adapters/codex/hooks/stop.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

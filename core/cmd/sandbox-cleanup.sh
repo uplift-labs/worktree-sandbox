@@ -1,8 +1,8 @@
 #!/bin/bash
-# sandbox-cleanup.sh — session cleanup: capture-commit + self-release + lifecycle.
+# sandbox-cleanup.sh - session cleanup: capture-commit + self-release + lifecycle.
 #
 # Usage:
-#   sandbox-cleanup.sh --repo <dir> --session <id>
+#   sandbox-cleanup.sh --repo <dir> --session <id> [--worktrees-dir <rel>] [--branch-prefix <glob>]
 #
 # Contract:
 #   --repo     main repo path
@@ -32,14 +32,16 @@ ROOT="$(cd "$CMD_DIR/../.." && pwd)"
 . "$ROOT/core/lib/ttl-marker.sh"
 . "$ROOT/core/lib/cleanup-log.sh"
 
-usage() { printf 'usage: sandbox-cleanup.sh --repo <dir> --session <id>\n' >&2; exit 2; }
+usage() { printf 'usage: sandbox-cleanup.sh --repo <dir> --session <id> [--worktrees-dir <rel>] [--branch-prefix <glob>]\n' >&2; exit 2; }
 
-REPO=""; SESSION=""; TRUST_DEAD=0
+REPO=""; SESSION=""; TRUST_DEAD=0; WT_DIR=".sandbox/worktrees"; BR_PREFIX="wt-*"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)       REPO="$2"; shift 2 ;;
-    --session)    SESSION="$2"; shift 2 ;;
-    --trust-dead) TRUST_DEAD=1; shift ;;
+    --repo)          REPO="$2"; shift 2 ;;
+    --session)       SESSION="$2"; shift 2 ;;
+    --trust-dead)    TRUST_DEAD=1; shift ;;
+    --worktrees-dir) WT_DIR="$2"; shift 2 ;;
+    --branch-prefix) BR_PREFIX="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; usage ;;
   esac
@@ -52,7 +54,7 @@ MARKER="$GIT_COMMON/sandbox-markers/$SESSION"
 [ -f "$MARKER" ] || exit 0
 
 BRANCH=$(awk '{print $1}' "$MARKER")
-SB="$REPO/.sandbox/worktrees/$BRANCH"
+SB="$REPO/$WT_DIR/$BRANCH"
 
 [ -d "$SB" ] || exit 0
 
@@ -63,11 +65,11 @@ SB="$REPO/.sandbox/worktrees/$BRANCH"
 _can_commit=1
 if sb_has_in_progress_operation "$SB"; then
   _can_commit=0
-  printf '[sandbox] cleanup: in-progress merge/rebase in %s — skipping capture-commit.\n' "$BRANCH" >&2
+  printf '[sandbox] cleanup: in-progress merge/rebase in %s - skipping capture-commit.\n' "$BRANCH" >&2
 fi
 if [ "$_can_commit" = 1 ] && ! git -C "$SB" symbolic-ref -q HEAD >/dev/null 2>&1; then
   _can_commit=0
-  printf '[sandbox] cleanup: detached HEAD in %s — skipping capture-commit.\n' "$BRANCH" >&2
+  printf '[sandbox] cleanup: detached HEAD in %s - skipping capture-commit.\n' "$BRANCH" >&2
 fi
 
 if [ "$_can_commit" = 1 ]; then
@@ -76,7 +78,7 @@ if [ "$_can_commit" = 1 ]; then
   # Commit iff something is actually staged.
   if ! git -C "$SB" diff --cached --quiet >/dev/null 2>&1; then
     if ! git -C "$SB" commit -q -m "chore(sandbox-cleanup): capture pending work" >/dev/null 2>&1; then
-      printf '[sandbox] cleanup: capture-commit failed on %s — sandbox left as-is.\n' "$BRANCH" >&2
+      printf '[sandbox] cleanup: capture-commit failed on %s - sandbox left as-is.\n' "$BRANCH" >&2
     fi
   fi
 fi
@@ -95,14 +97,14 @@ _cur_head=$(git -C "$SB" rev-parse HEAD 2>/dev/null || true)
 
 # Critical guard (mirrors sandbox-lifecycle.sh Phase 3): a fresh session whose
 # branch has never diverged from main (HEAD == initial_head) looks structurally
-# identical to a completed+merged session at the branch level — merge-base says
+# identical to a completed+merged session at the branch level - merge-base says
 # "ancestor", scan-uncommitted says "clean". Without the initial_head check,
 # Phase 2 releases the marker of a live session that simply hasn't committed
 # yet, and lifecycle's Phase 3 reap destroys the worktree while the user is
 # still working in it. Legacy markers (empty initial_head) also fall through
 # to TTL safety net.
 # When --trust-dead is passed (session-end.sh), the session has already
-# ended � skip the initial_head guard. An empty session that terminated
+# ended - skip the initial_head guard. An empty session that terminated
 # should self-reap (no live process to destroy). Without --trust-dead
 # (heartbeat parent-death cleanup), keep the guard: parent-death detection
 # can false-positive and destroying a live worktree is much worse than a
@@ -128,6 +130,9 @@ fi
 # Runs after self-release so that, when the marker has just been dropped,
 # lifecycle actually removes the worktree in this pass. For sessions that
 # kept their marker, lifecycle's live-marker protection skips them.
-bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" >/dev/null 2>&1 || true
+bash "$ROOT/core/cmd/sandbox-lifecycle.sh" \
+  --repo "$REPO" \
+  --worktrees-dir "$WT_DIR" \
+  --branch-prefix "$BR_PREFIX" >/dev/null 2>&1 || true
 
 exit 0
