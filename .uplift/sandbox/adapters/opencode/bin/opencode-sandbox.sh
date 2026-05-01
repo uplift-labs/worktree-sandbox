@@ -96,6 +96,7 @@ cleanup() {
   return "$_rc"
 }
 
+# shellcheck disable=SC2329  # invoked indirectly via trap
 _on_exit() {
   local _rc=$?
   cleanup "$_rc"
