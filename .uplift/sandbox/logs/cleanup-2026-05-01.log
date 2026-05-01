@@ -1,0 +1,2 @@
+2026-05-01T23:22:33Z RELEASE session=dogfood-opencode-version branch=wt-dogfood-opencode-version reason=cleanup-phase2-self-release
+2026-05-01T23:22:34Z DESTROY session=- branch=wt-dogfood-opencode-version reason=lifecycle-phase4-wt-remove
