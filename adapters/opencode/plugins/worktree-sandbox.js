@@ -60,9 +60,19 @@ function sanitizeId(value) {
   return safe || `${Date.now()}-${process.pid}`
 }
 
+function compactOpenCodeSessionID(value) {
+  const safe = sanitizeId(value)
+  if (safe.startsWith("oc-")) return safe
+
+  const sessionMatch = safe.match(/^(?:opencode-)?ses-([a-zA-Z0-9]+)/)
+  if (sessionMatch) return `oc-${sessionMatch[1].slice(0, 12)}`
+
+  const legacy = safe.startsWith("opencode-") ? safe.slice("opencode-".length) : safe
+  return `oc-${legacy.slice(0, 24)}`
+}
+
 function sandboxSessionID(sessionID) {
-  const safe = sanitizeId(sessionID || envValue("OPENCODE_RUN_ID") || `${Date.now()}-${process.pid}`)
-  return safe.startsWith("opencode-") ? safe : `opencode-${safe}`
+  return compactOpenCodeSessionID(sessionID || envValue("OPENCODE_RUN_ID") || `${Date.now()}-${process.pid}`)
 }
 
 function emptyConfig() {

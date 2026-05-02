@@ -5,6 +5,7 @@ import {
   createBranchObserver,
   createChangedFilesObserver,
   resolveSandboxWorktree,
+  shouldRenderSandboxFiles,
   shouldRunTuiPlugin,
   tuiPluginID,
 } from "./worktree-sandbox-branch-core.js"
@@ -205,6 +206,13 @@ const tui = async (api) => {
     order: 490,
     slots: {
       sidebar_content(_ctx, props) {
+        if (!shouldRenderSandboxFiles({
+          sessionID: props.session_id,
+          directory: api.state.path.directory,
+          worktreeHint: api.state.path.worktree,
+        })) {
+          return null
+        }
         return <SandboxFiles api={api} sessionID={props.session_id} />
       },
     },

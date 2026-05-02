@@ -138,9 +138,10 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 
 const [pluginPath, repo] = process.argv.slice(2)
-const sessionID = "auto-session"
-const sandbox = path.join(repo, ".sandbox", "worktrees", "wt-opencode-auto-session")
-const marker = path.join(repo, ".git", "sandbox-markers", "opencode-auto-session")
+const sessionID = "ses_21536e3b0ffeOW9vISvPpKcGG0"
+const compactSessionID = "oc-21536e3b0ffe"
+const sandbox = path.join(repo, ".sandbox", "worktrees", `wt-${compactSessionID}`)
+const marker = path.join(repo, ".git", "sandbox-markers", compactSessionID)
 
 function posix(value) {
   return String(value || "").replace(/\\/g, "/")
@@ -172,6 +173,7 @@ if (!posix(system.system.join("\n")).includes(posix(sandbox))) throw new Error("
 
 const shell = { env: {} }
 await hooks["shell.env"]({ sessionID, cwd: repo }, shell)
+if (shell.env.OPENCODE_SANDBOX_SESSION !== compactSessionID) throw new Error("shell env uses long sandbox session")
 if (posix(shell.env.OPENCODE_SANDBOX_WORKTREE) !== posix(sandbox)) throw new Error("shell env missing sandbox")
 
 const definition = { description: "Run commands" }
@@ -205,7 +207,7 @@ const patch = {
   },
 }
 await hooks["tool.execute.before"]({ tool: "apply_patch", sessionID, callID: "patch" }, patch)
-if (!posix(patch.args.patchText).includes(".sandbox/worktrees/wt-opencode-auto-session/auto-patch.txt")) {
+if (!posix(patch.args.patchText).includes(".sandbox/worktrees/wt-oc-21536e3b0ffe/auto-patch.txt")) {
   throw new Error(`patch path was not mapped into sandbox: ${patch.args.patchText}`)
 }
 
@@ -308,6 +310,9 @@ JS
   printf 'working\n' >> "$DIFF_WT/tracked.txt"
   printf 'free\n' > "$DIFF_WT/free.txt"
   printf 'dirty main\n' > "$DIFF_REPO/main-dirty.txt"
+  MANUAL_WT="$DIFF_REPO/.uplift/sandbox/worktrees/wt-opencode-manual"
+  mkdir -p "$(dirname "$MANUAL_WT")"
+  git -C "$DIFF_REPO" worktree add -q "$MANUAL_WT" -b wt-opencode-manual
 
   NODE_DIFF_SCRIPT="$FIXTURE_ROOT/opencode-sidebar-diff.mjs"
   cat > "$NODE_DIFF_SCRIPT" <<'JS'
@@ -315,7 +320,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 
-const [corePath, worktree] = process.argv.slice(2)
+const [corePath, worktree, manualWorktree] = process.argv.slice(2)
 const core = await import(pathToFileURL(corePath).href)
 
 function sleep(ms) {
@@ -355,6 +360,23 @@ const asyncFiles = await core.readSandboxChangedFilesAsync(worktree)
 const asyncNames = names(asyncFiles)
 for (const expected of ["README.md", "tracked.txt", "free.txt"]) {
   if (!asyncNames.includes(expected)) throw new Error(`async changed files missing: ${expected}`)
+}
+
+const manualResolved = core.resolveSandboxWorktree({ directory: manualWorktree, env: {} })
+if (path.resolve(manualResolved) !== path.resolve(manualWorktree)) {
+  throw new Error(`manual sandbox worktree was not inferred: ${manualResolved}`)
+}
+if (core.shouldRenderSandboxFiles({ directory: manualWorktree, env: {} })) {
+  throw new Error("custom sandbox files sidebar should not render when OpenCode already runs in the sandbox worktree")
+}
+if (!core.shouldRenderSandboxFiles({
+  directory: path.dirname(worktree),
+  env: {
+    OPENCODE_SANDBOX_ACTIVE: "1",
+    OPENCODE_SANDBOX_WORKTREE: worktree,
+  },
+})) {
+  throw new Error("custom sandbox files sidebar should render when OpenCode runs outside the sandbox worktree")
 }
 
 const updates = []
@@ -480,7 +502,7 @@ releaseInactive()
 await sleep(100)
 if (calls.length !== 0) throw new Error("inactive/user-disabled built-in files plugin was toggled")
 JS
-  OUT=$(node "$NODE_DIFF_SCRIPT" "$ROOT/adapters/opencode/tui/worktree-sandbox-branch-core.js" "$DIFF_WT" 2>&1)
+  OUT=$(node "$NODE_DIFF_SCRIPT" "$ROOT/adapters/opencode/tui/worktree-sandbox-branch-core.js" "$DIFF_WT" "$MANUAL_WT" 2>&1)
   ec=$?
   assert_exit "TUI sandbox sidebar diff smoke exits 0" 0 "$ec"
 else

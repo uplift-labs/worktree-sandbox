@@ -36,7 +36,7 @@ fi
 [ -z "$REPO" ] && REPO=$(sb_git_root "$(pwd)" 2>/dev/null || pwd)
 REPO=$(sb_git_root "$REPO" 2>/dev/null || printf '%s' "$REPO")
 if [ -z "$SESSION" ]; then
-  SESSION="opencode-$(date +%s)-$$"
+  SESSION="oc-$(date +%s)-$$"
 fi
 
 WT_DIR=$(sandbox_adapter_worktrees_dir "$REPO" "$ROOT")

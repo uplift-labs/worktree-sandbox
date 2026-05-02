@@ -146,9 +146,33 @@ export function shouldRunTuiPlugin(moduleURL = "", input = {}) {
   return !fs.existsSync(sandboxPlugin)
 }
 
+export function shouldRenderSandboxFiles(input = {}) {
+  const env = input.env || process.env
+  const directory = input.directory || input.worktreeHint || process.cwd()
+
+  const direct = envValue(env, "OPENCODE_SANDBOX_WORKTREE")
+  if (direct) return !!directory && !isWithinPath(directory, direct)
+
+  if (isLikelySandboxWorktreePath(directory, env) || isLikelySandboxWorktreePath(input.worktreeHint, env)) return false
+
+  const worktree = resolveSandboxWorktree({ ...input, env })
+  return !!worktree && !!directory && !isWithinPath(directory, worktree)
+}
+
 export function sandboxSessionID(sessionID, env = process.env) {
-  const safe = sanitizeId(sessionID || envValue(env, "OPENCODE_RUN_ID") || envValue(env, "OPENCODE_SANDBOX_SESSION"))
-  return safe.startsWith("opencode-") ? safe : `opencode-${safe}`
+  return compactOpenCodeSessionID(sessionID || envValue(env, "OPENCODE_RUN_ID") || envValue(env, "OPENCODE_SANDBOX_SESSION"))
+}
+
+function compactOpenCodeSessionID(value) {
+  const safe = sanitizeOptionalId(value)
+  if (!safe) return sanitizeId(value)
+  if (safe.startsWith("oc-")) return safe
+
+  const sessionMatch = safe.match(/^(?:opencode-)?ses-([a-zA-Z0-9]+)/)
+  if (sessionMatch) return `oc-${sessionMatch[1].slice(0, 12)}`
+
+  const legacy = safe.startsWith("opencode-") ? safe.slice("opencode-".length) : safe
+  return `oc-${legacy.slice(0, 24)}`
 }
 
 function sandboxSessionIDCandidates(sessionID, env = process.env) {
@@ -156,8 +180,9 @@ function sandboxSessionIDCandidates(sessionID, env = process.env) {
   const add = (value) => {
     const safe = sanitizeOptionalId(value)
     if (!safe) return
+    const compact = compactOpenCodeSessionID(safe)
     const prefixed = safe.startsWith("opencode-") ? safe : `opencode-${safe}`
-    for (const id of [prefixed, safe]) {
+    for (const id of [compact, prefixed, safe]) {
       if (id && !ids.includes(id)) ids.push(id)
     }
   }
@@ -375,6 +400,36 @@ function worktreeFromKnownLayout(repo, branch, env) {
   return ""
 }
 
+function sandboxBranchPrefix(env) {
+  return envValue(env, "OPENCODE_SANDBOX_BRANCH_PREFIX") || envValue(env, "WORKTREE_SANDBOX_BRANCH_PREFIX") || "wt"
+}
+
+function isSandboxBranch(branch, env) {
+  const prefix = sandboxBranchPrefix(env).replace(/[*?].*$/, "")
+  return !!branch && !!prefix && branch.startsWith(`${prefix}-`)
+}
+
+function isLikelySandboxWorktreePath(file, env) {
+  if (!file) return false
+  const prefix = sandboxBranchPrefix(env).replace(/[*?].*$/, "")
+  const resolved = path.resolve(file)
+  const name = path.basename(resolved)
+  if (!prefix || !name.startsWith(`${prefix}-`)) return false
+
+  const normalized = normalizePathForCompare(resolved).replace(/\\/g, "/")
+  return normalized.includes("/.uplift/sandbox/worktrees/") || normalized.includes("/.sandbox/worktrees/")
+}
+
+function inferCurrentSandboxWorktree(repo, env) {
+  if (!repo) return ""
+  const branch = readCurrentBranch(repo)
+  if (!isSandboxBranch(branch, env)) return ""
+
+  const worktree = worktreeFromList(repo, branch)
+  if (!worktree) return ""
+  return path.basename(path.resolve(worktree)) === branch ? path.resolve(worktree) : ""
+}
+
 export function resolveSandboxWorktree(input = {}) {
   const env = input.env || process.env
   const direct = envValue(env, "OPENCODE_SANDBOX_WORKTREE")
@@ -384,7 +439,7 @@ export function resolveSandboxWorktree(input = {}) {
   const repo = resolveRepo(base)
   const marker = resolveSandboxMarker({ ...input, directory: base, env })
   const branch = readMarkerBranch(marker)
-  if (!branch) return ""
+  if (!branch) return inferCurrentSandboxWorktree(repo, env)
 
   return worktreeFromList(repo, branch) || worktreeFromKnownLayout(repo, branch, env)
 }
