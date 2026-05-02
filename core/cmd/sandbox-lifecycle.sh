@@ -341,6 +341,7 @@ fi
 # Phase 4: try to clean each linked worktree
 # Collect marker-protected branches (still-alive sessions)
 PROTECTED=""
+PRESERVED_BRANCHES=""
 if [ -d "$MARKERS_DIR" ]; then
   for mf in "$MARKERS_DIR"/*; do
     [ -f "$mf" ] || continue
@@ -368,6 +369,7 @@ while IFS="	" read -r WT_PATH WT_BRANCH; do
       ;;
     "PRESERVED "*)
       LINES="${LINES}${status}\n"
+      PRESERVED_BRANCHES="$PRESERVED_BRANCHES $WT_BRANCH "
       sb_cleanup_log "$ROOT" "PRESERVE" "-" "$WT_BRANCH" "lifecycle-phase4-preserve"
       ;;
   esac
@@ -376,7 +378,7 @@ $(sb_list_worktrees "$GIT_ROOT")
 SBL
 
 # Phase 5: orphan branches matching prefix
-ORPHAN_OUT=$(sb_wt_sweep_orphan_branches "$GIT_ROOT" "$PREFIX" "$MAIN_BRANCH")
+ORPHAN_OUT=$(sb_wt_sweep_orphan_branches "$GIT_ROOT" "$PREFIX" "$MAIN_BRANCH" "$PRESERVED_BRANCHES")
 [ -n "$ORPHAN_OUT" ] && LINES="${LINES}${ORPHAN_OUT}\n"
 
 # Phase 6: residual directory sweep
