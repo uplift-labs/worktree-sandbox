@@ -5,7 +5,7 @@ import path from "node:path"
 const DEFAULT_REFRESH_MS = 1000
 const WATCH_REFRESH_MS = 5000
 const DEFAULT_DEBOUNCE_MS = 100
-const DEFAULT_FILES_REFRESH_MS = 1000
+const DEFAULT_FILES_REFRESH_MS = 0
 const BUILTIN_FILES_PLUGIN_ID = "internal:sidebar-files"
 const PLUGIN_ENABLED_KV = "plugin_enabled"
 
@@ -38,8 +38,21 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(next) && next > 0 ? next : fallback
 }
 
+function parseNonNegativeInt(value, fallback) {
+  const next = Number.parseInt(String(value || ""), 10)
+  return Number.isFinite(next) && next >= 0 ? next : fallback
+}
+
 function unrefTimer(timer) {
   if (timer && typeof timer.unref === "function") timer.unref()
+}
+
+function defer(fn) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(fn)
+    return
+  }
+  void Promise.resolve().then(fn)
 }
 
 function sanitizeOptionalId(value) {
@@ -86,7 +99,7 @@ export function branchRefreshMs(env = process.env, watcherActive = false) {
 }
 
 export function filesRefreshMs(env = process.env) {
-  return parsePositiveInt(envValue(env, "AISB_OPENCODE_FILES_REFRESH_MS"), DEFAULT_FILES_REFRESH_MS)
+  return parseNonNegativeInt(envValue(env, "AISB_OPENCODE_FILES_REFRESH_MS"), DEFAULT_FILES_REFRESH_MS)
 }
 
 export function resolveRepo(base) {
@@ -614,6 +627,12 @@ export function createChangedFilesObserver(options = {}) {
 
   const startPolling = () => {
     const nextMs = filesRefreshMs(env)
+    if (nextMs <= 0) {
+      clearIntervalTimer(state.pollTimer)
+      state.pollTimer = undefined
+      state.pollMs = 0
+      return
+    }
     if (state.pollTimer && state.pollMs === nextMs) return
     clearIntervalTimer(state.pollTimer)
     state.pollMs = nextMs
@@ -687,7 +706,9 @@ export function createChangedFilesObserver(options = {}) {
     },
   }
 
-  observer.schedule("start")
+  defer(() => {
+    void observer.refresh("start")
+  })
   startPolling()
   return observer
 }
