@@ -231,6 +231,7 @@ JS
   OUT=$(node "$NODE_AUTO_SCRIPT" "$ROOT/adapters/opencode/plugins/worktree-sandbox.js" "$REPO" 2>&1)
   ec=$?
   assert_exit "plugin auto sandbox smoke exits 0" 0 "$ec"
+  assert_not_contains "plugin auto sandbox does not write TUI-noisy stderr" "\[sandbox\]" "$OUT"
 else
   echo "node not found; skipping plugin import smoke"
 fi

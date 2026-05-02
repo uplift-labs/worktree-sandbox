@@ -213,7 +213,10 @@ OpenCode support is plugin-first with an optional strict launcher:
 OpenCode does not expose a pre-bootstrap hook that mutates its already-created
 instance `directory`/`worktree`. The plugin therefore virtualizes supported
 built-in tool paths into the sandbox instead of moving the process cwd. Use the
-launcher when the OpenCode process cwd itself must be the sandbox.
+launcher when the OpenCode process cwd itself must be the sandbox. In
+plugin-first mode OpenCode UI surfaces that read the instance `directory` or VCS
+state may continue to display the original repo/branch even while tool calls are
+mapped into the sandbox.
 
 The OS sandbox option is adapter configuration only. It wraps OpenCode `bash`
 tool calls through `@anthropic-ai/sandbox-runtime` on supported platforms

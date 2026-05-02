@@ -342,7 +342,7 @@ function createSessionConfig(sessionID, baseDirectory) {
   const brGlob = branchGlob(brPrefix)
 
   try {
-    const lifecycle = execSandbox(root, "core/cmd/sandbox-lifecycle.sh", [
+    execSandbox(root, "core/cmd/sandbox-lifecycle.sh", [
       "--repo",
       repo,
       "--worktrees-dir",
@@ -350,7 +350,6 @@ function createSessionConfig(sessionID, baseDirectory) {
       "--branch-prefix",
       brGlob,
     ])
-    if (lifecycle.trim()) console.error(`[sandbox] ${lifecycle.trim()}`)
   } catch {
     // Lifecycle is only a cleanup pre-pass; sandbox-init below decides safety.
   }
@@ -370,7 +369,6 @@ function createSessionConfig(sessionID, baseDirectory) {
   } catch (error) {
     const warning = (commandOutput(error.stdout) || commandOutput(error.stderr) || error.message).trim()
     state.warnings.set(session, warning || "sandbox creation failed")
-    console.error(`[sandbox] WARN: OpenCode sandbox creation failed - ${warning || "unknown error"}`)
     return emptyConfig()
   }
 
@@ -392,7 +390,6 @@ function createSessionConfig(sessionID, baseDirectory) {
   setProcessEnv(cfg)
   launchHeartbeat(cfg)
   registerProcessCleanup()
-  console.error(`[sandbox] OpenCode sandbox: ${worktree}`)
   return cfg
 }
 
