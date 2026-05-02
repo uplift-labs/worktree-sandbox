@@ -207,7 +207,7 @@ OpenCode support is plugin-first with an optional strict launcher:
 | Component | Role |
 |-----------|------|
 | OpenCode plugin | Loads from `.opencode/plugins/`, creates a sandbox on `session.created` or the first session-aware hook, injects system context, propagates sandbox env vars via `shell.env`, maps supported built-in tool paths into the session sandbox, blocks explicit main-repo write targets, refreshes markers on idle/status events, and calls `sandbox-cleanup.sh --trust-dead` on `session.deleted` or process exit. This is the normal `opencode` enforcement path. |
-| OpenCode TUI branch plugin | Loads from `.opencode/tui.json`, displays the session sandbox branch in prompt metadata, refreshes immediately from git `HEAD` filesystem events when available, and keeps `AISB_OPENCODE_BRANCH_REFRESH_MS` polling as a fallback. |
+| OpenCode TUI plugin | Loads from `.opencode/tui.json`, displays the session sandbox branch in prompt metadata, renders a right-sidebar `Sandbox Modified Files` list from the sandbox git diff against the current branch's merge-base with main/master, temporarily hides OpenCode's root-based `internal:sidebar-files` while the sandbox list is active, refreshes branch metadata immediately from git `HEAD` filesystem events when available, and keeps `AISB_OPENCODE_BRANCH_REFRESH_MS` / `AISB_OPENCODE_FILES_REFRESH_MS` polling as fallback. |
 | `opencode-sandbox.sh` launcher | Optional strict mode. Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars for the plugin and shell tools, launches heartbeat, and calls `sandbox-cleanup.sh --trust-dead` when OpenCode exits. |
 | `--with-opencode-os-sandbox` install option | Implies `--with-opencode` and adds the external `opencode-sandbox` npm plugin to root `opencode.json`. The launcher passes that source config to OpenCode when the plugin is present so it can load before the install files are committed into a fresh worktree. |
 
@@ -217,7 +217,9 @@ built-in tool paths into the sandbox instead of moving the process cwd. Use the
 launcher when the OpenCode process cwd itself must be the sandbox. In
 plugin-first mode OpenCode UI surfaces that read the instance `directory` or VCS
 state may continue to display the original repo/branch even while tool calls are
-mapped into the sandbox.
+mapped into the sandbox; the installed TUI plugin provides sandbox-specific
+branch and changed-file sidebar state. The temporary `internal:sidebar-files`
+deactivation is runtime-only and must not persist a disabled plugin setting.
 
 The OS sandbox option is adapter configuration only. It wraps OpenCode `bash`
 tool calls through `@anthropic-ai/sandbox-runtime` on supported platforms

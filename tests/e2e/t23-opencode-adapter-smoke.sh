@@ -294,6 +294,135 @@ JS
   OUT=$(node "$NODE_BRANCH_SCRIPT" "$ROOT/adapters/opencode/tui/worktree-sandbox-branch-core.js" "$WATCH_WT" 2>&1)
   ec=$?
   assert_exit "TUI branch watcher smoke exits 0" 0 "$ec"
+
+  echo "== TUI sandbox sidebar diff reads worktree changes =="
+  DIFF_REPO=$(fixture_repo "t23-sidebar-diff")
+  DIFF_WT=$(fixture_worktree "$DIFF_REPO" "diff-start" "tracked.txt" "one")
+  printf 'main\n' > "$DIFF_REPO/main-only.txt"
+  git -C "$DIFF_REPO" add main-only.txt
+  git -C "$DIFF_REPO" commit -q -m "feat: main-only change"
+  git -C "$DIFF_WT" merge -q --no-edit main
+  printf 'committed\n' >> "$DIFF_WT/README.md"
+  git -C "$DIFF_WT" add README.md
+  git -C "$DIFF_WT" commit -q -m "feat: committed sandbox change"
+  printf 'working\n' >> "$DIFF_WT/tracked.txt"
+  printf 'free\n' > "$DIFF_WT/free.txt"
+  printf 'dirty main\n' > "$DIFF_REPO/main-dirty.txt"
+
+  NODE_DIFF_SCRIPT="$FIXTURE_ROOT/opencode-sidebar-diff.mjs"
+  cat > "$NODE_DIFF_SCRIPT" <<'JS'
+import fs from "node:fs"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+
+const [corePath, worktree] = process.argv.slice(2)
+const core = await import(pathToFileURL(corePath).href)
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitFor(predicate, timeoutMs, label) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return
+    await sleep(50)
+  }
+  throw new Error(`timed out waiting for ${label}`)
+}
+
+function names(files) {
+  return files.map((item) => item.file)
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key)
+}
+
+const files = core.readSandboxChangedFiles(worktree)
+const initialNames = names(files)
+for (const expected of ["README.md", "tracked.txt", "free.txt"]) {
+  if (!initialNames.includes(expected)) throw new Error(`missing changed file: ${expected}`)
+}
+for (const unexpected of ["main-only.txt", "main-dirty.txt"]) {
+  if (initialNames.includes(unexpected)) throw new Error(`main repo change leaked into sandbox list: ${unexpected}`)
+}
+
+const readme = files.find((item) => item.file === "README.md")
+if (!readme || readme.additions < 1) throw new Error("committed diff additions were not counted")
+
+const updates = []
+const observer = core.createChangedFilesObserver({
+  getWorktree: () => worktree,
+  env: { AISB_OPENCODE_FILES_REFRESH_MS: "200" },
+  debounceMs: 50,
+  onChange: (update) => updates.push(update),
+})
+
+await waitFor(() => updates.some((update) => names(update.files).includes("free.txt")), 2000, "initial sidebar diff")
+fs.writeFileSync(path.join(worktree, "another.txt"), "another\n")
+await waitFor(() => updates.some((update) => names(update.files).includes("another.txt")), 3000, "updated sidebar diff")
+if (observer.status().pollMs !== 200) throw new Error("files observer did not use configured poll interval")
+observer.close()
+
+const pluginID = "internal:sidebar-files"
+let pluginActive = true
+let pluginEnabled = true
+const calls = []
+const kv = {}
+const fakeApi = {
+  kv: {
+    get(key, fallback) {
+      return hasOwn(kv, key) ? kv[key] : fallback
+    },
+    set(key, value) {
+      kv[key] = value
+    },
+  },
+  plugins: {
+    list() {
+      return [{ id: pluginID, enabled: pluginEnabled, active: pluginActive }]
+    },
+    async deactivate(id) {
+      calls.push(`deactivate:${id}`)
+      pluginActive = false
+      kv.plugin_enabled = { ...(kv.plugin_enabled || {}), [id]: false }
+      return true
+    },
+    async activate(id) {
+      calls.push(`activate:${id}`)
+      pluginActive = true
+      pluginEnabled = true
+      kv.plugin_enabled = { ...(kv.plugin_enabled || {}), [id]: true }
+      return true
+    },
+  },
+}
+
+const release = core.acquireBuiltinFilesHidden(fakeApi)
+await waitFor(() => calls.includes(`deactivate:${pluginID}`), 2000, "built-in files deactivation")
+if (pluginActive) throw new Error("built-in files plugin stayed active")
+if (!core.builtinFilesHiddenStatus().hidden) throw new Error("hidden status was not tracked")
+if (hasOwn(kv.plugin_enabled, pluginID)) throw new Error("built-in files disabled state leaked into KV")
+
+release()
+await waitFor(() => calls.includes(`activate:${pluginID}`), 2000, "built-in files restoration")
+if (!pluginActive) throw new Error("built-in files plugin was not restored")
+if (core.builtinFilesHiddenStatus().hidden) throw new Error("hidden status stayed enabled after release")
+if (hasOwn(kv.plugin_enabled, pluginID)) throw new Error("built-in files restored state leaked into KV")
+
+calls.length = 0
+pluginActive = false
+pluginEnabled = false
+const releaseInactive = core.acquireBuiltinFilesHidden(fakeApi)
+await sleep(100)
+releaseInactive()
+await sleep(100)
+if (calls.length !== 0) throw new Error("inactive/user-disabled built-in files plugin was toggled")
+JS
+  OUT=$(node "$NODE_DIFF_SCRIPT" "$ROOT/adapters/opencode/tui/worktree-sandbox-branch-core.js" "$DIFF_WT" 2>&1)
+  ec=$?
+  assert_exit "TUI sandbox sidebar diff smoke exits 0" 0 "$ec"
 else
   echo "node not found; skipping plugin import smoke"
 fi
