@@ -232,6 +232,68 @@ JS
   ec=$?
   assert_exit "plugin auto sandbox smoke exits 0" 0 "$ec"
   assert_not_contains "plugin auto sandbox does not write TUI-noisy stderr" "\[sandbox\]" "$OUT"
+
+  echo "== TUI branch watcher refreshes on HEAD changes and polling fallback =="
+  WATCH_REPO=$(fixture_repo "t23-branch-watch")
+  WATCH_WT=$(fixture_worktree "$WATCH_REPO" "watch-start" "watch.txt" "one")
+  NODE_BRANCH_SCRIPT="$FIXTURE_ROOT/opencode-branch-watch.mjs"
+  cat > "$NODE_BRANCH_SCRIPT" <<'JS'
+import { execFileSync } from "node:child_process"
+import { pathToFileURL } from "node:url"
+
+const [corePath, worktree] = process.argv.slice(2)
+const core = await import(pathToFileURL(corePath).href)
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitFor(predicate, timeoutMs, label) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return
+    await sleep(50)
+  }
+  throw new Error(`timed out waiting for ${label}`)
+}
+
+const watchUpdates = []
+const watched = core.createBranchObserver({
+  getWorktree: () => worktree,
+  env: { AISB_OPENCODE_BRANCH_REFRESH_MS: "10000" },
+  debounceMs: 50,
+  onChange: (update) => watchUpdates.push(update),
+})
+
+await waitFor(() => watchUpdates.some((item) => item.branch === "watch-start"), 2000, "initial watched branch")
+if (!watched.status().watcherActive) throw new Error("HEAD watcher did not start")
+
+execFileSync("git", ["-C", worktree, "switch", "-c", "watch-next"], { stdio: "ignore" })
+await waitFor(() => watchUpdates.some((item) => item.branch === "watch-next"), 5000, "watched branch switch")
+watched.close()
+if (watched.status().watcherActive) throw new Error("HEAD watcher stayed active after close")
+
+const pollUpdates = []
+const polled = core.createBranchObserver({
+  getWorktree: () => worktree,
+  env: {
+    AISB_OPENCODE_BRANCH_WATCH: "0",
+    AISB_OPENCODE_BRANCH_REFRESH_MS: "200",
+  },
+  debounceMs: 50,
+  onChange: (update) => pollUpdates.push(update),
+})
+
+await waitFor(() => pollUpdates.some((item) => item.branch === "watch-next"), 2000, "initial polled branch")
+if (polled.status().watcherActive) throw new Error("watcher started despite AISB_OPENCODE_BRANCH_WATCH=0")
+
+execFileSync("git", ["-C", worktree, "switch", "-c", "poll-next"], { stdio: "ignore" })
+await waitFor(() => pollUpdates.some((item) => item.branch === "poll-next"), 5000, "polled branch switch")
+polled.close()
+JS
+  OUT=$(node "$NODE_BRANCH_SCRIPT" "$ROOT/adapters/opencode/tui/worktree-sandbox-branch-core.js" "$WATCH_WT" 2>&1)
+  ec=$?
+  assert_exit "TUI branch watcher smoke exits 0" 0 "$ec"
 else
   echo "node not found; skipping plugin import smoke"
 fi

@@ -5,6 +5,10 @@ fixture_init() {
   FIXTURE_ROOT=$(mktemp -d 2>/dev/null || mktemp -d -t 'sandbox-test')
   export FIXTURE_ROOT
   unset GIT_DIR GIT_WORK_TREE 2>/dev/null || true
+  unset OPENCODE_SANDBOX_ACTIVE OPENCODE_SANDBOX_SOURCE OPENCODE_SANDBOX_SESSION 2>/dev/null || true
+  unset OPENCODE_SANDBOX_REPO OPENCODE_SANDBOX_ROOT OPENCODE_SANDBOX_WORKTREE 2>/dev/null || true
+  unset OPENCODE_SANDBOX_WORKTREES_DIR OPENCODE_SANDBOX_BRANCH_PREFIX 2>/dev/null || true
+  unset WORKTREE_SANDBOX_WORKTREES_DIR WORKTREE_SANDBOX_BRANCH_PREFIX 2>/dev/null || true
 }
 
 fixture_cleanup() {
@@ -42,4 +46,3 @@ fixture_worktree() {
   )
   printf '%s' "$wt"
 }
-

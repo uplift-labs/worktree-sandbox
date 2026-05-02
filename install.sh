@@ -114,6 +114,28 @@ sync_js_dir() {
   }
 }
 
+# sync_js_tsx_dir <src_dir> <dest_dir> — mirror local OpenCode TUI plugin files.
+sync_js_tsx_dir() {
+  local src="$1" dest="$2"
+  local files=() candidate
+
+  for candidate in "$src"/*.js "$src"/*.tsx; do
+    [ -e "$candidate" ] && files+=("$candidate")
+  done
+
+  if [ "${#files[@]}" -eq 0 ]; then
+    printf 'install: no *.js or *.tsx files in %s\n' "$src" >&2
+    exit 1
+  fi
+
+  mkdir -p "$dest"
+  rm -f "$dest"/*.js "$dest"/*.tsx
+  cp "${files[@]}" "$dest/" || {
+    printf 'install: copy failed %s -> %s\n' "$src" "$dest" >&2
+    exit 1
+  }
+}
+
 printf '[install] copying core to %s\n' "$INSTALL_ROOT/core"
 sync_sh_dir "$SCRIPT_DIR/core/lib" "$INSTALL_ROOT/core/lib"
 sync_sh_dir "$SCRIPT_DIR/core/cmd" "$INSTALL_ROOT/core/cmd"
@@ -332,6 +354,52 @@ PY
   [ "$rc" -eq 0 ] || exit "$rc"
 }
 
+merge_opencode_tui_plugin() {
+  local cfg="$1" plugin="$2"
+  local rc
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '[install] ERROR: python3 required to merge %s into %s.\n' "$plugin" "$cfg" >&2
+    exit 1
+  fi
+
+  python3 - "$cfg" "$plugin" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path(sys.argv[1])
+plugin_name = sys.argv[2]
+
+if cfg_path.exists():
+    config = json.loads(cfg_path.read_text(encoding="utf-8"))
+else:
+    config = {"$schema": "https://opencode.ai/tui.json"}
+
+if not isinstance(config, dict):
+    raise SystemExit(f"opencode TUI config must be a JSON object: {cfg_path}")
+
+plugins = config.get("plugin")
+if plugins is None:
+    config["plugin"] = [plugin_name]
+elif isinstance(plugins, list):
+    if plugin_name not in plugins:
+        plugins.append(plugin_name)
+elif isinstance(plugins, str):
+    if plugins == plugin_name:
+        config["plugin"] = [plugin_name]
+    else:
+        config["plugin"] = [plugins, plugin_name]
+else:
+    raise SystemExit(f"opencode TUI config 'plugin' must be an array or string: {cfg_path}")
+
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+cfg_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+  rc=$?
+  [ "$rc" -eq 0 ] || exit "$rc"
+}
+
 if [ "$WITH_CC" -eq 1 ]; then
   ADAPTER_DIR="$INSTALL_ROOT/adapter"
   mkdir -p "$ADAPTER_DIR/hooks" "$ADAPTER_DIR/lib"
@@ -389,11 +457,12 @@ fi
 
 if [ "$WITH_OPENCODE" -eq 1 ]; then
   OPENCODE_ADAPTER_DIR="$INSTALL_ROOT/adapters/opencode"
-  mkdir -p "$OPENCODE_ADAPTER_DIR/lib" "$OPENCODE_ADAPTER_DIR/bin" "$OPENCODE_ADAPTER_DIR/plugins"
+  mkdir -p "$OPENCODE_ADAPTER_DIR/lib" "$OPENCODE_ADAPTER_DIR/bin" "$OPENCODE_ADAPTER_DIR/plugins" "$OPENCODE_ADAPTER_DIR/tui"
   printf '[install] copying OpenCode adapter to %s\n' "$OPENCODE_ADAPTER_DIR"
   sync_sh_dir "$SCRIPT_DIR/adapters/opencode/lib" "$OPENCODE_ADAPTER_DIR/lib"
   sync_sh_dir "$SCRIPT_DIR/adapters/opencode/bin" "$OPENCODE_ADAPTER_DIR/bin"
   sync_js_dir "$SCRIPT_DIR/adapters/opencode/plugins" "$OPENCODE_ADAPTER_DIR/plugins"
+  sync_js_tsx_dir "$SCRIPT_DIR/adapters/opencode/tui" "$OPENCODE_ADAPTER_DIR/tui"
   chmod +x "$OPENCODE_ADAPTER_DIR/bin/"*.sh
 
   OPENCODE_PROJECT_PLUGIN_DIR="$TARGET/.opencode/plugins"
@@ -406,6 +475,21 @@ if [ "$WITH_OPENCODE" -eq 1 ]; then
       "$OPENCODE_PROJECT_PLUGIN_DIR/worktree-sandbox.js" >&2
     exit 1
   }
+
+  OPENCODE_TUI_PLUGIN_DIR="$TARGET/.opencode/tui-plugins"
+  printf '[install] writing OpenCode TUI plugin to %s\n' "$OPENCODE_TUI_PLUGIN_DIR"
+  mkdir -p "$OPENCODE_TUI_PLUGIN_DIR"
+  for _OPENCODE_TUI_FILE in "$SCRIPT_DIR/adapters/opencode/tui"/*.js "$SCRIPT_DIR/adapters/opencode/tui"/*.tsx; do
+    [ -e "$_OPENCODE_TUI_FILE" ] || continue
+    cp "$_OPENCODE_TUI_FILE" "$OPENCODE_TUI_PLUGIN_DIR/" || {
+      printf 'install: copy failed %s -> %s\n' "$_OPENCODE_TUI_FILE" "$OPENCODE_TUI_PLUGIN_DIR" >&2
+      exit 1
+    }
+  done
+
+  OPENCODE_TUI_CONFIG="$TARGET/.opencode/tui.json"
+  printf '[install] adding OpenCode TUI branch plugin to %s\n' "$OPENCODE_TUI_CONFIG"
+  merge_opencode_tui_plugin "$OPENCODE_TUI_CONFIG" "./tui-plugins/worktree-sandbox-branch.tsx"
 
   if [ "$WITH_OPENCODE_OS_SANDBOX" -eq 1 ]; then
     OPENCODE_CONFIG="$TARGET/opencode.json"

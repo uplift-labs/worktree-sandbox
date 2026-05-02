@@ -207,6 +207,7 @@ OpenCode support is plugin-first with an optional strict launcher:
 | Component | Role |
 |-----------|------|
 | OpenCode plugin | Loads from `.opencode/plugins/`, creates a sandbox on `session.created` or the first session-aware hook, injects system context, propagates sandbox env vars via `shell.env`, maps supported built-in tool paths into the session sandbox, blocks explicit main-repo write targets, refreshes markers on idle/status events, and calls `sandbox-cleanup.sh --trust-dead` on `session.deleted` or process exit. This is the normal `opencode` enforcement path. |
+| OpenCode TUI branch plugin | Loads from `.opencode/tui.json`, displays the session sandbox branch in prompt metadata, refreshes immediately from git `HEAD` filesystem events when available, and keeps `AISB_OPENCODE_BRANCH_REFRESH_MS` polling as a fallback. |
 | `opencode-sandbox.sh` launcher | Optional strict mode. Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars for the plugin and shell tools, launches heartbeat, and calls `sandbox-cleanup.sh --trust-dead` when OpenCode exits. |
 | `--with-opencode-os-sandbox` install option | Implies `--with-opencode` and adds the external `opencode-sandbox` npm plugin to root `opencode.json`. The launcher passes that source config to OpenCode when the plugin is present so it can load before the install files are committed into a fresh worktree. |
 
