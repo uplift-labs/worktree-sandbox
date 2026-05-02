@@ -198,7 +198,7 @@ if [ "$_parent_died" = 1 ] && [ -n "$SANDBOX_ROOT" ] && [ -n "$REPO" ]; then
       IFS="$_old_ifs"
       _owner_name=$(printf '%s' "$_owner_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
       [ -z "$_owner_name" ] && continue
-      if tasklist /FI "IMAGENAME eq $_owner_name" /NH 2>/dev/null | grep -qi "$_owner_name"; then
+      if MSYS2_ARG_CONV_EXCL='*' tasklist /FI "IMAGENAME eq $_owner_name" /NH 2>/dev/null | grep -qi "$_owner_name"; then
         _skip_cleanup=1
         break
       fi

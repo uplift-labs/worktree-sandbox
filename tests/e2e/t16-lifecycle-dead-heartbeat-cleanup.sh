@@ -5,6 +5,7 @@
 #   - Session with dead heartbeat PID but within grace period survives
 #   - Heartbeat sidecar (.hb) files are cleaned along with markers
 #   - Worktree directories are removed after marker cleanup
+#   - Dead heartbeat PID + live owner PID preserves an active session
 #   - Live heartbeat + dead parent winpid → lifecycle kills heartbeat + reclaims
 #   - Live heartbeat + unknown parent (winpid=0) within 2h grace → survives
 #   - Live heartbeat + unknown parent (winpid=0) past 2h grace → reclaimed
@@ -68,6 +69,70 @@ printf '99998 0 0' > "${MARKER2}.hb"
 bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
 assert_file_absent "marker cleaned (dead heartbeat, no work)" "$MARKER2"
 assert_dir_absent "worktree cleaned (dead heartbeat, no work)" "$SB2"
+
+# ── 2b. Dead heartbeat + live owner PID → preserved, then reclaimed ───
+# Regression: OpenCode can leave a dead heartbeat PID in .hb while the owning
+# OpenCode process is still alive.  Lifecycle must trust the live owner PID and
+# not destroy the active session's clean/empty worktree.
+echo "== dead heartbeat + live monitored PID → preserved, then cleaned after owner death =="
+
+SESSION2B="t16-dead-hb-live-owner"
+SB2B=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION2B")
+MARKER2B="$MARKERS/$SESSION2B"
+assert_file_exists "live-owner marker created" "$MARKER2B"
+
+sleep 9999 &
+LIVE_OWNER_PID=$!
+(exit 0) &
+DEAD_HB_PID=$!
+wait "$DEAD_HB_PID" 2>/dev/null || true
+printf '%s %s %s' "$DEAD_HB_PID" "0" "$LIVE_OWNER_PID" > "${MARKER2B}.hb"
+
+bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
+assert_file_exists "dead heartbeat but live monitored PID preserves marker" "$MARKER2B"
+assert_dir_exists "dead heartbeat but live monitored PID preserves worktree" "$SB2B"
+
+kill "$LIVE_OWNER_PID" 2>/dev/null; wait "$LIVE_OWNER_PID" 2>/dev/null || true
+bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
+assert_file_absent "marker cleaned after monitored PID exits" "$MARKER2B"
+assert_file_absent "sidecar cleaned after monitored PID exits" "${MARKER2B}.hb"
+assert_dir_absent "worktree cleaned after monitored PID exits" "$SB2B"
+
+# ── 2c. Dead heartbeat + live Windows parent PID → preserved (MSYS) ─────
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    echo "== dead heartbeat + live parent WINPID → preserved, then cleaned after parent death =="
+
+    SESSION2C="t16-dead-hb-live-winparent"
+    SB2C=$(bash "$ROOT/core/cmd/sandbox-init.sh" --repo "$REPO" --session "$SESSION2C")
+    MARKER2C="$MARKERS/$SESSION2C"
+    assert_file_exists "live-winparent marker created" "$MARKER2C"
+
+    sleep 9999 &
+    LIVE_PARENT_PID=$!
+    LIVE_PARENT_WINPID=$(cat "/proc/$LIVE_PARENT_PID/winpid" 2>/dev/null || true)
+
+    if [ -n "$LIVE_PARENT_WINPID" ]; then
+      (exit 0) &
+      DEAD_HB_WINPID=$!
+      wait "$DEAD_HB_WINPID" 2>/dev/null || true
+      printf '%s %s %s' "$DEAD_HB_WINPID" "$LIVE_PARENT_WINPID" "0" > "${MARKER2C}.hb"
+
+      bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
+      assert_file_exists "dead heartbeat but live WINPID preserves marker" "$MARKER2C"
+      assert_dir_exists "dead heartbeat but live WINPID preserves worktree" "$SB2C"
+
+      kill "$LIVE_PARENT_PID" 2>/dev/null; wait "$LIVE_PARENT_PID" 2>/dev/null || true
+      bash "$ROOT/core/cmd/sandbox-lifecycle.sh" --repo "$REPO" --ttl 5 >/dev/null 2>&1
+      assert_file_absent "marker cleaned after WINPID exits" "$MARKER2C"
+      assert_file_absent "sidecar cleaned after WINPID exits" "${MARKER2C}.hb"
+      assert_dir_absent "worktree cleaned after WINPID exits" "$SB2C"
+    else
+      printf 'SKIP: cannot resolve WINPID from /proc for live-parent regression\n'
+      kill "$LIVE_PARENT_PID" 2>/dev/null; wait "$LIVE_PARENT_PID" 2>/dev/null || true
+    fi
+    ;;
+esac
 
 # ── 3. No sidecar at all + stale → TTL reclaim works ─────────────────
 echo "== no sidecar + stale → TTL reclaims =="
