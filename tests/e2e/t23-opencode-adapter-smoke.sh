@@ -129,6 +129,108 @@ JS
     "$REPO" "$SB_DIRTY" "$SESSION_DIRTY" "$ROOT" 2>&1)
   ec=$?
   assert_exit "plugin smoke exits 0" 0 "$ec"
+
+  echo "== plugin auto-creates session sandbox without launcher =="
+  NODE_AUTO_SCRIPT="$FIXTURE_ROOT/opencode-plugin-auto-smoke.mjs"
+  cat > "$NODE_AUTO_SCRIPT" <<'JS'
+import fs from "node:fs"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+
+const [pluginPath, repo] = process.argv.slice(2)
+const sessionID = "auto-session"
+const sandbox = path.join(repo, ".sandbox", "worktrees", "wt-opencode-auto-session")
+const marker = path.join(repo, ".git", "sandbox-markers", "opencode-auto-session")
+
+function posix(value) {
+  return String(value || "").replace(/\\/g, "/")
+}
+
+for (const key of [
+  "OPENCODE_SANDBOX_ACTIVE",
+  "OPENCODE_SANDBOX_SOURCE",
+  "OPENCODE_SANDBOX_SESSION",
+  "OPENCODE_SANDBOX_REPO",
+  "OPENCODE_SANDBOX_ROOT",
+  "OPENCODE_SANDBOX_WORKTREE",
+  "OPENCODE_SANDBOX_WORKTREES_DIR",
+  "OPENCODE_SANDBOX_BRANCH_PREFIX",
+]) {
+  delete process.env[key]
+}
+
+const mod = await import(pathToFileURL(pluginPath).href)
+const hooks = await mod.WorktreeSandbox({ directory: repo, worktree: repo })
+
+await hooks.event({ event: { type: "session.created", properties: { sessionID } } })
+if (!fs.existsSync(sandbox)) throw new Error(`sandbox missing: ${sandbox}`)
+if (!fs.existsSync(marker)) throw new Error(`marker missing: ${marker}`)
+
+const system = { system: [] }
+await hooks["experimental.chat.system.transform"]({ sessionID, model: {} }, system)
+if (!posix(system.system.join("\n")).includes(posix(sandbox))) throw new Error("system prompt missing sandbox root")
+
+const shell = { env: {} }
+await hooks["shell.env"]({ sessionID, cwd: repo }, shell)
+if (posix(shell.env.OPENCODE_SANDBOX_WORKTREE) !== posix(sandbox)) throw new Error("shell env missing sandbox")
+
+const definition = { description: "Run commands" }
+await hooks["tool.definition"]({ toolID: "bash" }, definition)
+if (!definition.description.includes("worktree-sandbox is active")) throw new Error("tool definition missing sandbox note")
+
+const relativeWrite = { args: { filePath: "created.txt" } }
+await hooks["tool.execute.before"]({ tool: "write", sessionID, callID: "relative-write" }, relativeWrite)
+if (posix(relativeWrite.args.filePath) !== posix(path.join(sandbox, "created.txt"))) {
+  throw new Error(`relative write was not mapped into sandbox: ${relativeWrite.args.filePath}`)
+}
+
+let deniedWrite = false
+try {
+  await hooks["tool.execute.before"](
+    { tool: "write", sessionID, callID: "main-write" },
+    { args: { filePath: path.join(repo, "README.md") } },
+  )
+} catch (error) {
+  deniedWrite = String(error.message).includes("sandbox-guard")
+}
+if (!deniedWrite) throw new Error("absolute write to main repo was not denied")
+
+const grep = { args: { pattern: "README" } }
+await hooks["tool.execute.before"]({ tool: "grep", sessionID, callID: "grep" }, grep)
+if (posix(grep.args.path) !== posix(sandbox)) throw new Error(`grep default path was not sandbox: ${grep.args.path}`)
+
+const patch = {
+  args: {
+    patchText: "*** Begin Patch\n*** Add File: auto-patch.txt\n+hello\n*** End Patch",
+  },
+}
+await hooks["tool.execute.before"]({ tool: "apply_patch", sessionID, callID: "patch" }, patch)
+if (!posix(patch.args.patchText).includes(".sandbox/worktrees/wt-opencode-auto-session/auto-patch.txt")) {
+  throw new Error(`patch path was not mapped into sandbox: ${patch.args.patchText}`)
+}
+
+const bashDefault = { args: { command: "git status", description: "Shows git status" } }
+await hooks["tool.execute.before"]({ tool: "bash", sessionID, callID: "bash-default" }, bashDefault)
+if (posix(bashDefault.args.workdir) !== posix(sandbox)) throw new Error(`bash default workdir was not sandbox: ${bashDefault.args.workdir}`)
+
+let deniedBash = false
+try {
+  await hooks["tool.execute.before"](
+    { tool: "bash", sessionID, callID: "bash-main" },
+    { args: { command: "touch README.md", workdir: repo, description: "Touches file" } },
+  )
+} catch (error) {
+  deniedBash = String(error.message).includes("sandbox-guard")
+}
+if (!deniedBash) throw new Error("bash from main repo was not denied")
+
+await hooks.event({ event: { type: "session.deleted", properties: { info: { id: sessionID } } } })
+if (fs.existsSync(sandbox)) throw new Error("empty auto sandbox was not cleaned up")
+if (fs.existsSync(marker)) throw new Error("empty auto marker was not cleaned up")
+JS
+  OUT=$(node "$NODE_AUTO_SCRIPT" "$ROOT/adapters/opencode/plugins/worktree-sandbox.js" "$REPO" 2>&1)
+  ec=$?
+  assert_exit "plugin auto sandbox smoke exits 0" 0 "$ec"
 else
   echo "node not found; skipping plugin import smoke"
 fi

@@ -132,6 +132,18 @@ if [ -z "${OPENCODE_CONFIG_DIR:-}" ] && [ -d "$ADAPTER_DIR/plugins" ]; then
   export OPENCODE_CONFIG_DIR="$ADAPTER_DIR"
 fi
 
+# The launcher creates a fresh git worktree from HEAD, so a just-installed
+# opencode.json may not exist inside that worktree yet. Point OpenCode at the
+# source repo config when it enables the npm OS sandbox plugin.
+if [ -z "${OPENCODE_CONFIG:-}" ]; then
+  for _OPENCODE_CFG in "$REPO/opencode.json" "$REPO/opencode.jsonc"; do
+    if [ -f "$_OPENCODE_CFG" ] && grep -qF '"opencode-sandbox"' "$_OPENCODE_CFG" 2>/dev/null; then
+      export OPENCODE_CONFIG="$_OPENCODE_CFG"
+      break
+    fi
+  done
+fi
+
 printf '[sandbox] OpenCode sandbox: %s\n' "$SB" >&2
 
 trap _on_exit EXIT

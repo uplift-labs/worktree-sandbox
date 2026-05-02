@@ -2,14 +2,15 @@
 # install.sh — install worktree-sandbox into a target git repo.
 #
 # Usage:
-#   bash install.sh [--target <repo-dir>] [--prefix <dir>] [--with-claude-code] [--with-codex] [--with-opencode]
+#   bash install.sh [--target <repo-dir>] [--prefix <dir>] [--with-claude-code] [--with-codex] [--with-opencode] [--with-opencode-os-sandbox]
 #
 # By default installs only the core commands + a pre-merge-commit git hook that
 # runs sandbox-merge-gate. With --with-claude-code, also installs the Claude
 # Code adapter hooks and a settings-hooks.json snippet. With --with-codex,
 # installs Codex lifecycle hooks and a launcher. With --with-opencode,
-# installs an OpenCode launcher and project-local plugin. JSON hook merges
-# require python3 on PATH.
+# installs an OpenCode launcher and project-local plugin. With
+# --with-opencode-os-sandbox, also adds the opencode-sandbox npm plugin to
+# opencode.json. JSON hook/config merges require python3 on PATH.
 
 set -u
 
@@ -19,6 +20,7 @@ PREFIX=".uplift"
 WITH_CC=0
 WITH_CODEX=0
 WITH_OPENCODE=0
+WITH_OPENCODE_OS_SANDBOX=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -27,13 +29,16 @@ while [ $# -gt 0 ]; do
     --with-claude-code) WITH_CC=1; shift ;;
     --with-codex)       WITH_CODEX=1; shift ;;
     --with-opencode)    WITH_OPENCODE=1; shift ;;
+    --with-opencode-os-sandbox) WITH_OPENCODE_OS_SANDBOX=1; shift ;;
     -h|--help)
-      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) printf 'unknown arg: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
+
+[ "$WITH_OPENCODE_OS_SANDBOX" -eq 1 ] && WITH_OPENCODE=1
 
 [ -z "$TARGET" ] && TARGET="$(pwd)"
 [ -d "$TARGET/.git" ] || { printf 'not a git repo: %s\n' "$TARGET" >&2; exit 1; }
@@ -218,12 +223,18 @@ INSTALLER="\$REPO_ROOT/install.sh"
 _cc_flag=""
 _codex_flag=""
 _opencode_flag=""
+_opencode_os_flag=""
 [ -d "\$REPO_ROOT/$_ADAPTER_REL" ] && _cc_flag="--with-claude-code"
 [ -d "\$REPO_ROOT/$_CODEX_ADAPTER_REL" ] && _codex_flag="--with-codex"
 [ -d "\$REPO_ROOT/$_OPENCODE_ADAPTER_REL" ] && _opencode_flag="--with-opencode"
+if [ -d "\$REPO_ROOT/$_OPENCODE_ADAPTER_REL" ] && \
+   [ -f "\$REPO_ROOT/opencode.json" ] && \
+   grep -qF '"opencode-sandbox"' "\$REPO_ROOT/opencode.json" 2>/dev/null; then
+  _opencode_os_flag="--with-opencode-os-sandbox"
+fi
 
 # Run in background so merge returns instantly; suppress output unless error.
-( bash "\$INSTALLER" --target "\$REPO_ROOT" \$_cc_flag \$_codex_flag \$_opencode_flag >/dev/null 2>&1 || \
+( bash "\$INSTALLER" --target "\$REPO_ROOT" \$_cc_flag \$_codex_flag \$_opencode_flag \$_opencode_os_flag >/dev/null 2>&1 || \
   printf '[sandbox] post-merge: install.sh failed (exit %s)\n' "\$?" >&2 ) &
 exit 0
 HOOK_EOF
@@ -273,6 +284,52 @@ enable_codex_hooks_feature() {
     } > "$tmp"
   fi
   mv "$tmp" "$cfg"
+}
+
+merge_opencode_plugin() {
+  local cfg="$1" plugin="$2"
+  local rc
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '[install] ERROR: python3 required to merge %s into %s.\n' "$plugin" "$cfg" >&2
+    exit 1
+  fi
+
+  python3 - "$cfg" "$plugin" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path(sys.argv[1])
+plugin_name = sys.argv[2]
+
+if cfg_path.exists():
+    config = json.loads(cfg_path.read_text(encoding="utf-8"))
+else:
+    config = {"$schema": "https://opencode.ai/config.json"}
+
+if not isinstance(config, dict):
+    raise SystemExit(f"opencode config must be a JSON object: {cfg_path}")
+
+plugins = config.get("plugin")
+if plugins is None:
+    config["plugin"] = [plugin_name]
+elif isinstance(plugins, list):
+    if plugin_name not in plugins:
+        plugins.append(plugin_name)
+elif isinstance(plugins, str):
+    if plugins == plugin_name:
+        config["plugin"] = [plugin_name]
+    else:
+        config["plugin"] = [plugins, plugin_name]
+else:
+    raise SystemExit(f"opencode config 'plugin' must be an array or string: {cfg_path}")
+
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+cfg_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+PY
+  rc=$?
+  [ "$rc" -eq 0 ] || exit "$rc"
 }
 
 if [ "$WITH_CC" -eq 1 ]; then
@@ -349,6 +406,12 @@ if [ "$WITH_OPENCODE" -eq 1 ]; then
       "$OPENCODE_PROJECT_PLUGIN_DIR/worktree-sandbox.js" >&2
     exit 1
   }
+
+  if [ "$WITH_OPENCODE_OS_SANDBOX" -eq 1 ]; then
+    OPENCODE_CONFIG="$TARGET/opencode.json"
+    printf '[install] adding opencode-sandbox plugin to %s\n' "$OPENCODE_CONFIG"
+    merge_opencode_plugin "$OPENCODE_CONFIG" "opencode-sandbox"
+  fi
 fi
 
 printf '[install] done.\n'
@@ -358,4 +421,5 @@ printf '  post-merge hook: %s\n' "$POST_MERGE"
 [ "$WITH_CC" -eq 1 ] && printf '  claude-code adapter: %s\n' "$INSTALL_ROOT/adapter"
 [ "$WITH_CODEX" -eq 1 ] && printf '  codex adapter: %s\n' "$INSTALL_ROOT/adapters/codex"
 [ "$WITH_OPENCODE" -eq 1 ] && printf '  opencode adapter: %s\n' "$INSTALL_ROOT/adapters/opencode"
+[ "$WITH_OPENCODE_OS_SANDBOX" -eq 1 ] && printf '  opencode OS sandbox plugin: %s\n' "$TARGET/opencode.json"
 exit 0

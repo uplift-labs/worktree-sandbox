@@ -25,7 +25,14 @@ Or install for OpenCode:
 
 ```bash
 bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-opencode
-bash .uplift/sandbox/adapters/opencode/bin/opencode-sandbox.sh
+opencode
+```
+
+Or add OS-level sandboxing for OpenCode `bash` commands on macOS/Linux:
+
+```bash
+bash <(curl -sSL https://raw.githubusercontent.com/uplift-labs/worktree-sandbox/v1.1.0/remote-install.sh) --with-opencode-os-sandbox
+opencode
 ```
 
 That's it. Your repo now has sandbox isolation. Every session gets its own worktree, `main` is protected by a merge gate, and stale sandboxes clean themselves up.
@@ -107,7 +114,7 @@ worktree-sandbox/
 ├── adapters/
 │   ├── claude-code/ ← Claude Code hook translation layer
 │   ├── codex/       ← Codex hook wrappers + launcher
-│   └── opencode/    ← OpenCode launcher + plugin
+│   └── opencode/    ← OpenCode plugin + optional launcher
 └── install.sh
 ```
 
@@ -142,9 +149,10 @@ git clone https://github.com/uplift-labs/worktree-sandbox
 bash worktree-sandbox/install.sh --with-claude-code
 bash worktree-sandbox/install.sh --with-codex
 bash worktree-sandbox/install.sh --with-opencode
+bash worktree-sandbox/install.sh --with-opencode-os-sandbox
 ```
 
-Installs `core/` to `.uplift/sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks, and ignores only `.uplift/sandbox/worktrees/`. With `--with-claude-code`, the adapter goes to `.uplift/sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`). With `--with-codex`, the adapter goes to `.uplift/sandbox/adapters/codex/`, hooks are merged into `.codex/hooks.json`, and `features.codex_hooks = true` is enabled in `.codex/config.toml`. With `--with-opencode`, the adapter goes to `.uplift/sandbox/adapters/opencode/` and a project-local plugin is written to `.opencode/plugins/worktree-sandbox.js`.
+Installs `core/` to `.uplift/sandbox/core/`, wires `pre-merge-commit` + `post-merge` git hooks, and ignores only `.uplift/sandbox/worktrees/`. With `--with-claude-code`, the adapter goes to `.uplift/sandbox/adapter/` and its hook config is merged into `.claude/settings.json` (requires `python3`). With `--with-codex`, the adapter goes to `.uplift/sandbox/adapters/codex/`, hooks are merged into `.codex/hooks.json`, and `features.codex_hooks = true` is enabled in `.codex/config.toml`. With `--with-opencode`, the adapter goes to `.uplift/sandbox/adapters/opencode/`, a project-local plugin is written to `.opencode/plugins/worktree-sandbox.js`, and normal `opencode` launches create sandbox sessions through plugin hooks. With `--with-opencode-os-sandbox`, `--with-opencode` is implied and the external `opencode-sandbox` npm plugin is added to `opencode.json` (requires `python3`).
 
 Re-running is safe (idempotent). The `post-merge` hook auto-syncs `.uplift/sandbox/` on every merge and preserves installed adapter flags.
 
@@ -188,14 +196,16 @@ Codex currently has no `SessionEnd` hook equivalent to Claude Code. Use the laun
 
 ### OpenCode
 
-The OpenCode adapter (`adapters/opencode/`) is launcher-first:
+The OpenCode adapter (`adapters/opencode/`) is plugin-first:
 
 | Component | What it does |
 |---|---|
-| `opencode-sandbox.sh` | Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars, launches heartbeat, and calls cleanup when OpenCode exits. |
-| Plugin | Adds system context, passes sandbox env vars to shell tools, and blocks supported write tools when they target the main repo while the session owns a sandbox. |
+| Plugin | Loads automatically from `.opencode/plugins/`, creates a sandbox on `session.created` or the first session-aware hook, injects system context, passes sandbox env vars to shell tools, maps supported built-in tools to the sandbox, blocks explicit main-repo write targets, refreshes markers, and cleans up on `session.deleted` or process exit. |
+| `opencode-sandbox.sh` | Optional strict mode: creates the sandbox before OpenCode starts and runs `opencode` from the sandbox worktree. Useful when you need the OpenCode process cwd itself to be the sandbox. |
 
-Use the launcher for the strongest guarantee. The plugin is defense-in-depth; it cannot relocate an already-started OpenCode process into a different working directory.
+The plugin is the normal path: after `--with-opencode`, run `opencode` as usual. OpenCode does not expose a pre-bootstrap hook that mutates its internal project root, so the plugin virtualizes supported tool paths into the sandbox and uses the launcher only as an optional stricter cwd mode.
+
+Optional OS-level sandboxing is available with `--with-opencode-os-sandbox`. This does not replace worktree isolation; it adds the community `opencode-sandbox` npm plugin so OpenCode `bash` tool calls are wrapped by `@anthropic-ai/sandbox-runtime`. On macOS this uses Seatbelt / `sandbox-exec`; on Linux it uses `bubblewrap` plus runtime helpers; on Windows it is unsupported and commands pass through unsandboxed. The launcher points OpenCode at the source repo `opencode.json` when that config enables `opencode-sandbox`, so the npm plugin can load even before the install changes have been committed into the newly-created worktree.
 
 ### Git hooks
 
@@ -226,7 +236,7 @@ A sandbox goes through a predictable lifecycle. Understanding it prevents subtle
 
 ### Phase C — Session end
 
-For Claude Code, `session-end.sh` runs on termination (`/exit`, Ctrl+C/D, terminal close, logout). On real exit: (1) kill heartbeat, (2) stage + commit pending work, (3) run lifecycle. On `/clear` or `/compact`: heartbeat only. For Codex CLI, `codex-sandbox.sh` performs the equivalent cleanup when the launched `codex` process exits.
+For Claude Code, `session-end.sh` runs on termination (`/exit`, Ctrl+C/D, terminal close, logout). On real exit: (1) kill heartbeat, (2) stage + commit pending work, (3) run lifecycle. On `/clear` or `/compact`: heartbeat only. For Codex CLI, `codex-sandbox.sh` performs the equivalent cleanup when the launched `codex` process exits. For OpenCode, the project plugin cleanup runs on `session.deleted` and process exit; the optional launcher performs the same cleanup when the launched `opencode` process exits.
 
 **SessionEnd never merges into main.** The user merges when ready.
 

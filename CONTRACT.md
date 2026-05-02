@@ -202,17 +202,23 @@ stronger guarantee because it changes Codex's working root to the sandbox.
 
 ## Adapter responsibilities (OpenCode)
 
-OpenCode support is launcher-first with a project plugin for defense-in-depth:
+OpenCode support is plugin-first with an optional strict launcher:
 
 | Component | Role |
 |-----------|------|
-| `opencode-sandbox.sh` launcher | Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars for the plugin and shell tools, launches heartbeat, and calls `sandbox-cleanup.sh --trust-dead` when OpenCode exits. This is the recommended enforcement path. |
-| OpenCode plugin | Injects system context, propagates sandbox env vars via `shell.env`, and blocks supported write tools from targeting the main repo while the session owns a sandbox. |
+| OpenCode plugin | Loads from `.opencode/plugins/`, creates a sandbox on `session.created` or the first session-aware hook, injects system context, propagates sandbox env vars via `shell.env`, maps supported built-in tool paths into the session sandbox, blocks explicit main-repo write targets, refreshes markers on idle/status events, and calls `sandbox-cleanup.sh --trust-dead` on `session.deleted` or process exit. This is the normal `opencode` enforcement path. |
+| `opencode-sandbox.sh` launcher | Optional strict mode. Creates the sandbox before OpenCode starts, runs `opencode` from the sandbox worktree, exports `OPENCODE_SANDBOX_*` env vars for the plugin and shell tools, launches heartbeat, and calls `sandbox-cleanup.sh --trust-dead` when OpenCode exits. |
+| `--with-opencode-os-sandbox` install option | Implies `--with-opencode` and adds the external `opencode-sandbox` npm plugin to root `opencode.json`. The launcher passes that source config to OpenCode when the plugin is present so it can load before the install files are committed into a fresh worktree. |
 
-The plugin must not be the primary isolation mechanism: OpenCode plugins can
-observe and guard tool calls, but they cannot reliably move an already-started
-OpenCode process into a sandbox worktree. Cleanup relies on the launcher exit
-path plus heartbeat/TTL safety nets.
+OpenCode does not expose a pre-bootstrap hook that mutates its already-created
+instance `directory`/`worktree`. The plugin therefore virtualizes supported
+built-in tool paths into the sandbox instead of moving the process cwd. Use the
+launcher when the OpenCode process cwd itself must be the sandbox.
+
+The OS sandbox option is adapter configuration only. It wraps OpenCode `bash`
+tool calls through `@anthropic-ai/sandbox-runtime` on supported platforms
+(macOS Seatbelt / Linux bubblewrap) and passes through unsandboxed on Windows or
+unsupported setups. It does not change `core/cmd/*` behavior or exit codes.
 
 ## Git hooks installed by `install.sh`
 
