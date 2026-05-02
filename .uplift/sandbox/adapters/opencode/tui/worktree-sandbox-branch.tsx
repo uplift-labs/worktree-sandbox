@@ -10,6 +10,14 @@ import {
 const BRANCH_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated"]
 const FILE_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated", "session.diff"]
 
+function branchBadgeEnabled() {
+  return process.env.AISB_OPENCODE_BRANCH_BADGE === "1"
+}
+
+function hideBuiltinFilesEnabled() {
+  return process.env.AISB_OPENCODE_HIDE_BUILTIN_FILES === "1"
+}
+
 function eventSessionID(event) {
   return event?.properties?.sessionID || event?.properties?.info?.id || event?.sessionID || ""
 }
@@ -72,6 +80,8 @@ function SandboxFiles(props) {
   const api = props.api
   let releaseBuiltinFiles = undefined
   const updateBuiltinFilesVisibility = (worktree) => {
+    if (!hideBuiltinFilesEnabled()) return
+
     if (worktree && !releaseBuiltinFiles) {
       releaseBuiltinFiles = acquireBuiltinFilesHidden(api, {
         onError(error, phase) {
@@ -118,7 +128,7 @@ function SandboxFiles(props) {
     api.event.on(type, (event) => {
       const id = eventSessionID(event)
       if (props.sessionID && id && id !== props.sessionID) return
-      void observer.refresh(`event:${type}`)
+      observer.schedule(`event:${type}`)
     }),
   )
 
@@ -166,17 +176,19 @@ function SandboxFiles(props) {
 }
 
 const tui = async (api) => {
-  api.slots.register({
-    order: 50,
-    slots: {
-      home_prompt_right() {
-        return <BranchBadge api={api} />
+  if (branchBadgeEnabled()) {
+    api.slots.register({
+      order: 50,
+      slots: {
+        home_prompt_right() {
+          return <BranchBadge api={api} />
+        },
+        session_prompt_right(_ctx, props) {
+          return <BranchBadge api={api} sessionID={props.session_id} />
+        },
       },
-      session_prompt_right(_ctx, props) {
-        return <BranchBadge api={api} sessionID={props.session_id} />
-      },
-    },
-  })
+    })
+  }
 
   api.slots.register({
     order: 490,

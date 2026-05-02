@@ -351,6 +351,12 @@ for (const unexpected of ["main-only.txt", "main-dirty.txt"]) {
 const readme = files.find((item) => item.file === "README.md")
 if (!readme || readme.additions < 1) throw new Error("committed diff additions were not counted")
 
+const asyncFiles = await core.readSandboxChangedFilesAsync(worktree)
+const asyncNames = names(asyncFiles)
+for (const expected of ["README.md", "tracked.txt", "free.txt"]) {
+  if (!asyncNames.includes(expected)) throw new Error(`async changed files missing: ${expected}`)
+}
+
 const updates = []
 const defaultObserver = core.createChangedFilesObserver({
   getWorktree: () => worktree,

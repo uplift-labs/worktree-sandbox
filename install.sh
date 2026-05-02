@@ -479,6 +479,7 @@ if [ "$WITH_OPENCODE" -eq 1 ]; then
     exit 1
   }
 
+  OPENCODE_TUI_CONFIG="$TARGET/.opencode/tui.json"
   OPENCODE_TUI_PLUGIN_DIR="$TARGET/.opencode/tui-plugins"
   printf '[install] writing OpenCode TUI plugin to %s\n' "$OPENCODE_TUI_PLUGIN_DIR"
   mkdir -p "$OPENCODE_TUI_PLUGIN_DIR"
@@ -490,7 +491,6 @@ if [ "$WITH_OPENCODE" -eq 1 ]; then
     }
   done
 
-  OPENCODE_TUI_CONFIG="$TARGET/.opencode/tui.json"
   printf '[install] adding OpenCode TUI branch plugin to %s\n' "$OPENCODE_TUI_CONFIG"
   merge_opencode_tui_plugin "$OPENCODE_TUI_CONFIG" "./tui-plugins/worktree-sandbox-branch.tsx"
 

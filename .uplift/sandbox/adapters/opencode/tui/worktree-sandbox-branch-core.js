@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -6,6 +6,8 @@ const DEFAULT_REFRESH_MS = 1000
 const WATCH_REFRESH_MS = 5000
 const DEFAULT_DEBOUNCE_MS = 100
 const DEFAULT_FILES_REFRESH_MS = 0
+const DEFAULT_GIT_TIMEOUT_MS = 3000
+const DEFAULT_GIT_MAX_BUFFER = 10 * 1024 * 1024
 const BUILTIN_FILES_PLUGIN_ID = "internal:sidebar-files"
 const PLUGIN_ENABLED_KV = "plugin_enabled"
 
@@ -31,6 +33,32 @@ function gitOutput(args, cwd) {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim()
+}
+
+function gitTimeoutMs(env = process.env) {
+  return parsePositiveInt(envValue(env, "AISB_OPENCODE_GIT_TIMEOUT_MS"), DEFAULT_GIT_TIMEOUT_MS)
+}
+
+function gitOutputAsync(args, cwd, env = process.env) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "git",
+      ["-C", cwd, ...args],
+      {
+        encoding: "utf8",
+        maxBuffer: DEFAULT_GIT_MAX_BUFFER,
+        timeout: gitTimeoutMs(env),
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(String(stdout || "").trim())
+      },
+    )
+  })
 }
 
 function parsePositiveInt(value, fallback) {
@@ -142,6 +170,15 @@ export function readCurrentBranch(worktree) {
   if (!worktree) return ""
   try {
     return gitOutput(["branch", "--show-current"], worktree)
+  } catch {
+    return ""
+  }
+}
+
+async function readCurrentBranchAsync(worktree, env = process.env) {
+  if (!worktree) return ""
+  try {
+    return await gitOutputAsync(["branch", "--show-current"], worktree, env)
   } catch {
     return ""
   }
@@ -326,10 +363,28 @@ function gitOutputOrEmpty(args, cwd) {
   }
 }
 
+async function gitOutputOrEmptyAsync(args, cwd, env = process.env) {
+  try {
+    return await gitOutputAsync(args, cwd, env)
+  } catch {
+    return ""
+  }
+}
+
 function gitCommitExists(worktree, ref) {
   if (!worktree || !ref) return false
   try {
     gitOutput(["cat-file", "-e", `${ref}^{commit}`], worktree)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function gitCommitExistsAsync(worktree, ref, env = process.env) {
+  if (!worktree || !ref) return false
+  try {
+    await gitOutputAsync(["cat-file", "-e", `${ref}^{commit}`], worktree, env)
     return true
   } catch {
     return false
@@ -349,6 +404,19 @@ export function resolveSandboxBaseRef(input = {}, worktree = "") {
   return gitCommitExists(worktree, initialHead) ? initialHead : ""
 }
 
+export async function resolveSandboxBaseRefAsync(input = {}, worktree = "") {
+  const env = input.env || process.env
+  const explicit = input.baseRef || envValue(env, "OPENCODE_SANDBOX_BASE_REF")
+  if (await gitCommitExistsAsync(worktree, explicit, env)) return explicit
+
+  const mainBase = await resolveMainMergeBaseAsync(worktree, env)
+  if (mainBase) return mainBase
+
+  const marker = resolveSandboxMarker({ ...input, worktree, env })
+  const initialHead = readMarkerInitialHead(marker)
+  return (await gitCommitExistsAsync(worktree, initialHead, env)) ? initialHead : ""
+}
+
 function resolveMainMergeBase(worktree, env = process.env) {
   if (!worktree) return ""
   const current = readCurrentBranch(worktree)
@@ -364,6 +432,25 @@ function resolveMainMergeBase(worktree, env = process.env) {
     if (candidate === current || !gitCommitExists(worktree, candidate)) continue
     const base = gitOutputOrEmpty(["merge-base", "HEAD", candidate], worktree)
     if (gitCommitExists(worktree, base)) return base
+  }
+  return ""
+}
+
+async function resolveMainMergeBaseAsync(worktree, env = process.env) {
+  if (!worktree) return ""
+  const current = await readCurrentBranchAsync(worktree, env)
+  const candidates = [
+    envValue(env, "OPENCODE_SANDBOX_COMPARE_REF"),
+    "main",
+    "master",
+    "origin/main",
+    "origin/master",
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    if (candidate === current || !(await gitCommitExistsAsync(worktree, candidate, env))) continue
+    const base = await gitOutputOrEmptyAsync(["merge-base", "HEAD", candidate], worktree, env)
+    if (await gitCommitExistsAsync(worktree, base, env)) return base
   }
   return ""
 }
@@ -409,6 +496,27 @@ export function readSandboxChangedFiles(worktree, input = {}) {
   addNumstat(files, gitOutputOrEmpty(["diff", "--numstat", "--cached", "--"], worktree))
   addNumstat(files, gitOutputOrEmpty(["diff", "--numstat", "--"], worktree))
   addUntracked(files, gitOutputOrEmpty(["ls-files", "--others", "--exclude-standard"], worktree))
+
+  return Array.from(files.values()).sort((a, b) => a.file.localeCompare(b.file))
+}
+
+export async function readSandboxChangedFilesAsync(worktree, input = {}) {
+  if (!worktree || !fs.existsSync(worktree)) return []
+
+  const env = input.env || process.env
+  const files = new Map()
+  const baseRef = await resolveSandboxBaseRefAsync(input, worktree)
+  const [headDiff, cachedDiff, workingDiff, untracked] = await Promise.all([
+    baseRef ? gitOutputOrEmptyAsync(["diff", "--numstat", `${baseRef}..HEAD`, "--"], worktree, env) : Promise.resolve(""),
+    gitOutputOrEmptyAsync(["diff", "--numstat", "--cached", "--"], worktree, env),
+    gitOutputOrEmptyAsync(["diff", "--numstat", "--"], worktree, env),
+    gitOutputOrEmptyAsync(["ls-files", "--others", "--exclude-standard"], worktree, env),
+  ])
+
+  addNumstat(files, headDiff)
+  addNumstat(files, cachedDiff)
+  addNumstat(files, workingDiff)
+  addUntracked(files, untracked)
 
   return Array.from(files.values()).sort((a, b) => a.file.localeCompare(b.file))
 }
@@ -642,9 +750,10 @@ export function createChangedFilesObserver(options = {}) {
     unrefTimer(state.pollTimer)
   }
 
-  const resolveWorktree = () => {
+  const resolveWorktree = async () => {
     const worktree = typeof options.getWorktree === "function" ? options.getWorktree() : resolveSandboxWorktree(options)
-    return worktree ? path.resolve(worktree) : ""
+    const resolved = worktree && typeof worktree.then === "function" ? await worktree : worktree
+    return resolved ? path.resolve(resolved) : ""
   }
 
   const refresh = async (reason) => {
@@ -656,8 +765,9 @@ export function createChangedFilesObserver(options = {}) {
 
     state.refreshing = true
     try {
-      const worktree = resolveWorktree()
-      const files = worktree ? readSandboxChangedFiles(worktree, { ...options, worktree, env }) : []
+      const worktree = await resolveWorktree()
+      const files = worktree ? await readSandboxChangedFilesAsync(worktree, { ...options, worktree, env }) : []
+      if (state.stopped) return
       const signature = filesSignature(files, worktree)
       state.worktree = worktree
       if (signature !== state.signature) {

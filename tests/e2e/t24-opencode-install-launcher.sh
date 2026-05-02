@@ -28,6 +28,7 @@ assert_contains "install output mentions opencode" "opencode adapter" "$OUT"
 
 echo "== re-install updates managed plugin but preserves unrelated project plugins =="
 printf 'user plugin\n' > "$REPO/.opencode/plugins/user-plugin.js"
+mkdir -p "$REPO/.opencode/tui-plugins"
 printf 'user tui plugin\n' > "$REPO/.opencode/tui-plugins/user-tui-plugin.tsx"
 printf 'stale\n' > "$REPO/.uplift/sandbox/adapters/opencode/plugins/stale.js"
 printf 'stale\n' > "$REPO/.uplift/sandbox/adapters/opencode/tui/stale.tsx"
