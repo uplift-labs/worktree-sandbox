@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 const DEFAULT_REFRESH_MS = 1000
 const WATCH_REFRESH_MS = 5000
@@ -9,6 +10,7 @@ const DEFAULT_FILES_REFRESH_MS = 2000
 const DEFAULT_GIT_TIMEOUT_MS = 3000
 const DEFAULT_GIT_MAX_BUFFER = 10 * 1024 * 1024
 const BUILTIN_FILES_PLUGIN_ID = "internal:sidebar-files"
+const TUI_PLUGIN_ID_PREFIX = "worktree-sandbox.branch"
 const PLUGIN_ENABLED_KV = "plugin_enabled"
 
 const builtinFilesState = {
@@ -93,6 +95,55 @@ function sanitizeOptionalId(value) {
 
 function sanitizeId(value) {
   return sanitizeOptionalId(value) || `${Date.now()}-${process.pid}`
+}
+
+function normalizePathForCompare(file) {
+  const resolved = path.resolve(file)
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved
+}
+
+function isWithinPath(child, parent) {
+  if (!child || !parent) return false
+  const rel = path.relative(path.resolve(parent), path.resolve(child))
+  return rel === "" || (!!rel && !rel.startsWith("..") && !path.isAbsolute(rel))
+}
+
+function moduleFilePath(moduleURL) {
+  if (!moduleURL) return ""
+  try {
+    if (String(moduleURL).startsWith("file://")) return fileURLToPath(moduleURL)
+    return path.resolve(String(moduleURL))
+  } catch {
+    return ""
+  }
+}
+
+function hashString(value) {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+export function tuiPluginID(moduleURL = "") {
+  const file = moduleFilePath(moduleURL)
+  if (!file) return TUI_PLUGIN_ID_PREFIX
+  return `${TUI_PLUGIN_ID_PREFIX}.${hashString(normalizePathForCompare(file))}`
+}
+
+export function shouldRunTuiPlugin(moduleURL = "", input = {}) {
+  const env = input.env || process.env
+  const worktree = resolveSandboxWorktree({ ...input, env })
+  const directory = input.directory || input.worktreeHint || process.cwd()
+  if (!worktree || !directory || !isWithinPath(directory, worktree)) return true
+
+  const modulePath = moduleFilePath(moduleURL)
+  if (!modulePath || isWithinPath(modulePath, worktree)) return true
+
+  const sandboxPlugin = path.join(worktree, ".opencode", "tui-plugins", path.basename(modulePath))
+  return !fs.existsSync(sandboxPlugin)
 }
 
 export function sandboxSessionID(sessionID, env = process.env) {

@@ -5,7 +5,11 @@ import {
   createBranchObserver,
   createChangedFilesObserver,
   resolveSandboxWorktree,
+  shouldRunTuiPlugin,
+  tuiPluginID,
 } from "./worktree-sandbox-branch-core.js"
+
+const MODULE_URL = import.meta.url
 
 const BRANCH_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated"]
 const FILE_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated", "session.diff"]
@@ -176,6 +180,13 @@ function SandboxFiles(props) {
 }
 
 const tui = async (api) => {
+  if (!shouldRunTuiPlugin(MODULE_URL, {
+    directory: api.state.path.directory,
+    worktreeHint: api.state.path.worktree,
+  })) {
+    return
+  }
+
   if (branchBadgeEnabled()) {
     api.slots.register({
       order: 50,
@@ -201,6 +212,6 @@ const tui = async (api) => {
 }
 
 export default {
-  id: "worktree-sandbox.branch",
+  id: tuiPluginID(MODULE_URL),
   tui,
 }

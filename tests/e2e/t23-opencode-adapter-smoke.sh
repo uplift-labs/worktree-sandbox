@@ -396,6 +396,35 @@ await waitFor(() => updates.some((update) => names(update.files).includes("anoth
 if (observer.status().pollMs !== 200) throw new Error("files observer did not use configured poll interval")
 observer.close()
 
+const sandboxPluginPath = path.join(worktree, ".opencode", "tui-plugins", "worktree-sandbox-branch.tsx")
+const parentPluginPath = path.join(path.dirname(worktree), "parent", "worktree-sandbox-branch.tsx")
+fs.mkdirSync(path.dirname(sandboxPluginPath), { recursive: true })
+fs.mkdirSync(path.dirname(parentPluginPath), { recursive: true })
+fs.writeFileSync(sandboxPluginPath, "sandbox plugin\n")
+fs.writeFileSync(parentPluginPath, "parent plugin\n")
+const sandboxPluginURL = pathToFileURL(sandboxPluginPath).href
+const parentPluginURL = pathToFileURL(parentPluginPath).href
+if (core.tuiPluginID(sandboxPluginURL) === core.tuiPluginID(parentPluginURL)) {
+  throw new Error("TUI plugin ids should be path-scoped")
+}
+const launcherEnv = {
+  OPENCODE_SANDBOX_ACTIVE: "1",
+  OPENCODE_SANDBOX_WORKTREE: worktree,
+}
+if (!core.shouldRunTuiPlugin(sandboxPluginURL, { directory: worktree, env: launcherEnv })) {
+  throw new Error("sandbox-local TUI plugin should run in launcher worktree")
+}
+if (core.shouldRunTuiPlugin(parentPluginURL, { directory: worktree, env: launcherEnv })) {
+  throw new Error("parent TUI plugin should no-op when sandbox copy is loaded")
+}
+if (!core.shouldRunTuiPlugin(parentPluginURL, { directory: path.dirname(worktree), env: launcherEnv })) {
+  throw new Error("parent TUI plugin should still run outside launcher worktree")
+}
+fs.rmSync(path.dirname(sandboxPluginPath), { recursive: true, force: true })
+if (!core.shouldRunTuiPlugin(parentPluginURL, { directory: worktree, env: launcherEnv })) {
+  throw new Error("parent TUI plugin should run when sandbox copy is absent")
+}
+
 const pluginID = "internal:sidebar-files"
 let pluginActive = true
 let pluginEnabled = true
