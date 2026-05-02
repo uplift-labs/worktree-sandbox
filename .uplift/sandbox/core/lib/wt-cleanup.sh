@@ -53,9 +53,10 @@ sb_wt_remove_if_merged() {
     return 2
   fi
 
-  # Remove
-  if git -C "$repo" worktree remove "$wt_path" 2>/dev/null \
-     || git -C "$repo" worktree remove --force "$wt_path" 2>/dev/null; then
+  # Remove. Do not force here: a normal remove failure usually means the
+  # worktree is locked or currently in use. Preserving is safer than partially
+  # tearing down an active worktree and leaving a detached residual directory.
+  if git -C "$repo" worktree remove "$wt_path" 2>/dev/null; then
     git -C "$repo" branch -d "$wt_branch" >/dev/null 2>&1
     printf 'REMOVED %s' "$wt_branch"
     return 0
@@ -66,12 +67,15 @@ sb_wt_remove_if_merged() {
 }
 
 sb_wt_sweep_orphan_branches() {
-  local repo="$1" prefix_glob="$2" main_branch="$3"
+  local repo="$1" prefix_glob="$2" main_branch="$3" skip_branches="${4:-}"
 
   git -C "$repo" branch --list "$prefix_glob" 2>/dev/null | while IFS= read -r line; do
     local branch="${line#  }"
     branch="${branch#\* }"
     [ -z "$branch" ] && continue
+    case "$skip_branches" in
+      *" $branch "*) continue ;;
+    esac
     if git -C "$repo" worktree list --porcelain 2>/dev/null \
        | grep -q "branch refs/heads/$branch"; then
       continue
