@@ -364,9 +364,23 @@ const defaultObserver = core.createChangedFilesObserver({
   onChange: (update) => updates.push(update),
 })
 
-await waitFor(() => updates.some((update) => names(update.files).includes("free.txt")), 2000, "initial sidebar diff without polling")
-if (defaultObserver.status().pollMs !== 0) throw new Error("files observer should not poll by default")
+await waitFor(() => updates.some((update) => names(update.files).includes("free.txt")), 2000, "initial sidebar diff")
+if (defaultObserver.status().pollMs !== 2000) throw new Error("files observer should poll by default")
+fs.writeFileSync(path.join(worktree, "default-poll.txt"), "default poll\n")
+await waitFor(() => updates.some((update) => names(update.files).includes("default-poll.txt")), 5000, "default polled sidebar diff")
 defaultObserver.close()
+updates.length = 0
+
+const optOutObserver = core.createChangedFilesObserver({
+  getWorktree: () => worktree,
+  env: { AISB_OPENCODE_FILES_REFRESH_MS: "0" },
+  debounceMs: 50,
+  onChange: (update) => updates.push(update),
+})
+
+await waitFor(() => updates.some((update) => names(update.files).includes("default-poll.txt")), 2000, "initial sidebar diff with polling disabled")
+if (optOutObserver.status().pollMs !== 0) throw new Error("files observer did not honor disabled polling")
+optOutObserver.close()
 updates.length = 0
 
 const observer = core.createChangedFilesObserver({
