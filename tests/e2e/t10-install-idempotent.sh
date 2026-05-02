@@ -27,6 +27,14 @@ assert_file_exists "core cmd copied"    "$REPO/.uplift/sandbox/core/cmd/sandbox-
 assert_file_exists "adapter lib copied" "$REPO/.uplift/sandbox/adapter/lib/json-field.sh"
 assert_file_exists "adapter hook copied" "$REPO/.uplift/sandbox/adapter/hooks/session-end.sh"
 
+echo "== install accepts linked worktree targets =="
+LINKED=$(fixture_worktree "$REPO" "install-linked" "linked.txt" "linked")
+OUT=$(bash "$ROOT/install.sh" --target "$LINKED" --with-opencode 2>&1)
+ec=$?
+assert_exit "linked worktree install exits 0" 0 "$ec"
+assert_file_exists "linked worktree core copied" "$LINKED/.uplift/sandbox/core/cmd/sandbox-init.sh"
+assert_file_exists "linked worktree opencode TUI copied" "$LINKED/.uplift/sandbox/adapters/opencode/tui/worktree-sandbox-branch.tsx"
+
 echo "== seed stale files + runtime state, then re-run install =="
 # Pretend an older version had these files that are no longer in source.
 echo "# stale core lib" > "$REPO/.uplift/sandbox/core/lib/ghost-lib.sh"

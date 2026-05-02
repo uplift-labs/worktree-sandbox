@@ -41,7 +41,10 @@ done
 [ "$WITH_OPENCODE_OS_SANDBOX" -eq 1 ] && WITH_OPENCODE=1
 
 [ -z "$TARGET" ] && TARGET="$(pwd)"
-[ -d "$TARGET/.git" ] || { printf 'not a git repo: %s\n' "$TARGET" >&2; exit 1; }
+git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+  printf 'not a git repo: %s\n' "$TARGET" >&2
+  exit 1
+}
 
 # --- Migration from legacy path ---
 migrate_old_path() {
