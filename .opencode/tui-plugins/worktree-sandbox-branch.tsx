@@ -1,6 +1,13 @@
 /** @jsxImportSource @opentui/solid */
-import { createSignal, onCleanup } from "solid-js"
-import { createBranchObserver, resolveSandboxWorktree } from "./worktree-sandbox-branch-core.js"
+import { For, Show, createSignal, onCleanup } from "solid-js"
+import {
+  acquireBuiltinFilesHidden,
+  createBranchObserver,
+  createChangedFilesObserver,
+  resolveSandboxWorktree,
+} from "./worktree-sandbox-branch-core.js"
+
+const REFRESH_EVENTS = ["session.status", "session.updated", "session.idle", "tool.execute.after", "file.watcher.updated"]
 
 function eventSessionID(event) {
   return event?.properties?.sessionID || event?.properties?.info?.id || event?.sessionID || ""
@@ -31,7 +38,7 @@ function BranchBadge(props) {
     },
   })
 
-  const off = ["session.status", "session.updated", "session.idle", "tool.execute.after", "file.watcher.updated"].map(
+  const off = REFRESH_EVENTS.map(
     (type) =>
       api.event.on(type, (event) => {
         const id = eventSessionID(event)
@@ -58,6 +65,105 @@ function BranchBadge(props) {
   )
 }
 
+function SandboxFiles(props) {
+  const [files, setFiles] = createSignal([])
+  const [open, setOpen] = createSignal(true)
+  const api = props.api
+  let releaseBuiltinFiles = undefined
+  const updateBuiltinFilesVisibility = (worktree) => {
+    if (worktree && !releaseBuiltinFiles) {
+      releaseBuiltinFiles = acquireBuiltinFilesHidden(api, {
+        onError(error, phase) {
+          if (process.env.AISB_OPENCODE_FILES_DEBUG !== "1") return
+          api.ui.toast({
+            variant: "warning",
+            message: `sandbox files ${phase} failed: ${error?.message || error}`,
+            duration: 3000,
+          })
+        },
+      })
+      return
+    }
+
+    if (!worktree && releaseBuiltinFiles) {
+      releaseBuiltinFiles()
+      releaseBuiltinFiles = undefined
+    }
+  }
+  const observer = createChangedFilesObserver({
+    sessionID: props.sessionID,
+    getWorktree() {
+      return resolveSandboxWorktree({
+        sessionID: props.sessionID,
+        directory: api.state.path.directory,
+        worktreeHint: api.state.path.worktree,
+      })
+    },
+    onChange(next) {
+      setFiles(next.files)
+      updateBuiltinFilesVisibility(next.worktree)
+    },
+    onError(error, phase) {
+      if (process.env.AISB_OPENCODE_FILES_DEBUG !== "1") return
+      api.ui.toast({
+        variant: "warning",
+        message: `sandbox files ${phase} failed: ${error?.message || error}`,
+        duration: 3000,
+      })
+    },
+  })
+
+  const off = [...REFRESH_EVENTS, "session.diff"].map((type) =>
+    api.event.on(type, (event) => {
+      const id = eventSessionID(event)
+      if (props.sessionID && id && id !== props.sessionID) return
+      void observer.refresh(`event:${type}`)
+    }),
+  )
+
+  onCleanup(() => {
+    if (releaseBuiltinFiles) releaseBuiltinFiles()
+    for (const stop of off) stop()
+    observer.close()
+  })
+
+  const title = () => process.env.AISB_OPENCODE_FILES_LABEL || "Sandbox Modified Files"
+
+  return (
+    <Show when={files().length > 0}>
+      <box>
+        <box flexDirection="row" gap={1} onMouseDown={() => files().length > 2 && setOpen((value) => !value)}>
+          <Show when={files().length > 2}>
+            <text fg={api.theme.current.text}>{open() ? "▼" : "▶"}</text>
+          </Show>
+          <text fg={api.theme.current.text}>
+            <b>{title()}</b>
+          </text>
+        </box>
+        <Show when={files().length <= 2 || open()}>
+          <For each={files()}>
+            {(item) => (
+              <box flexDirection="row" gap={1} justifyContent="space-between">
+                <text fg={api.theme.current.textMuted} wrapMode="none">
+                  {item.file}
+                </text>
+                <box flexDirection="row" gap={1} flexShrink={0}>
+                  <Show when={item.additions}>
+                    <text fg={api.theme.current.diffAdded}>+{item.additions}</text>
+                  </Show>
+                  <Show when={item.deletions}>
+                    <text fg={api.theme.current.diffRemoved}>-{item.deletions}</text>
+                  </Show>
+                </box>
+              </box>
+            )}
+          </For>
+        </Show>
+      </box>
+    </Show>
+  )
+}
+
 const tui = async (api) => {
   api.slots.register({
     order: 50,
@@ -67,6 +173,15 @@ const tui = async (api) => {
       },
       session_prompt_right(props) {
         return <BranchBadge api={api} sessionID={props.session_id} />
+      },
+    },
+  })
+
+  api.slots.register({
+    order: 490,
+    slots: {
+      sidebar_content(_ctx, props) {
+        return <SandboxFiles api={api} sessionID={props.session_id} />
       },
     },
   })
