@@ -88,7 +88,7 @@ _sb_hb_is_session_alive() {
     if ! command -v tasklist >/dev/null 2>&1; then
       return 0
     fi
-    if tasklist /FI "PID eq $_parent_wp" /NH 2>/dev/null | grep -q "$_parent_wp"; then
+    if MSYS2_ARG_CONV_EXCL='*' tasklist /FI "PID eq $_parent_wp" /NH 2>/dev/null | grep -q "$_parent_wp"; then
       return 0  # parent alive
     fi
     return 1  # parent confirmed dead
@@ -105,9 +105,43 @@ _sb_hb_is_session_alive() {
   return 0  # within grace — protected
 }
 
+# _sb_hb_has_live_owner <sidecar_path>
+# Returns 0 only when the sidecar independently identifies a live owner
+# process. Unlike _sb_hb_is_session_alive, this intentionally does not apply
+# unknown-parent grace: it is used after the heartbeat PID itself is already
+# dead, where "0 0" means there is no owner evidence left.
+_sb_hb_has_live_owner() {
+  local _hb_path="$1"
+  local _content _parent_wp _monitored_pid _field_count
+  _content=$(cat "$_hb_path" 2>/dev/null) || return 1
+
+  _field_count=$(printf '%s' "$_content" | awk '{print NF}')
+  [ "${_field_count:-0}" -ge 2 ] || return 1
+
+  _parent_wp=$(printf '%s' "$_content" | awk '{print $2}')
+  _monitored_pid=$(printf '%s' "$_content" | awk '{print $3}')
+
+  if [ -n "$_monitored_pid" ] && [ "$_monitored_pid" != "0" ]; then
+    kill -0 "$_monitored_pid" 2>/dev/null && return 0
+    return 1
+  fi
+
+  if [ -n "$_parent_wp" ] && [ "$_parent_wp" != "0" ]; then
+    # Match _sb_hb_is_session_alive's fail-safe: if a Windows PID is recorded
+    # but this platform cannot verify it, preserve rather than risk deleting a
+    # live sandbox.
+    if ! command -v tasklist >/dev/null 2>&1; then
+      return 0
+    fi
+    MSYS2_ARG_CONV_EXCL='*' tasklist /FI "PID eq $_parent_wp" /NH 2>/dev/null | grep -q "$_parent_wp" && return 0
+  fi
+
+  return 1
+}
+
 # _sb_kill_dead_heartbeat <marker_path>
 # Check heartbeat sidecar for a marker and kill zombie heartbeats.
-# Returns: 0 = session alive (caller should skip),
+# Returns: 0 = session alive / owner still alive (caller should skip),
 #          1 = no heartbeat file,
 #          2 = heartbeat existed but session is confirmed dead.
 _sb_kill_dead_heartbeat() {
@@ -122,7 +156,15 @@ _sb_kill_dead_heartbeat() {
     kill "$_hb_pid" 2>/dev/null || true
     rm -f "${mf}.hb" 2>/dev/null || true
   fi
-  # .hb with dead PID is left for later phases; caller deletes with marker.
+  # The heartbeat process can die while the owning host process is still alive
+  # (observed with OpenCode on Windows).  A live owner PID in the sidecar is
+  # still load-bearing protection; keep the marker and sidecar so a later
+  # lifecycle pass can re-check after the owner exits.
+  if _sb_hb_has_live_owner "${mf}.hb"; then
+    return 0
+  fi
+
+  # .hb with dead PID and no live owner is left for later phases; caller deletes with marker.
   return 2  # heartbeat existed, session confirmed dead
 }
 
