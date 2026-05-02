@@ -7,7 +7,8 @@ import {
   resolveSandboxWorktree,
 } from "./worktree-sandbox-branch-core.js"
 
-const REFRESH_EVENTS = ["session.status", "session.updated", "session.idle", "tool.execute.after", "file.watcher.updated"]
+const BRANCH_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated"]
+const FILE_REFRESH_EVENTS = ["session.idle", "tool.execute.after", "file.watcher.updated", "session.diff"]
 
 function eventSessionID(event) {
   return event?.properties?.sessionID || event?.properties?.info?.id || event?.sessionID || ""
@@ -38,7 +39,7 @@ function BranchBadge(props) {
     },
   })
 
-  const off = REFRESH_EVENTS.map(
+  const off = BRANCH_REFRESH_EVENTS.map(
     (type) =>
       api.event.on(type, (event) => {
         const id = eventSessionID(event)
@@ -113,7 +114,7 @@ function SandboxFiles(props) {
     },
   })
 
-  const off = [...REFRESH_EVENTS, "session.diff"].map((type) =>
+  const off = FILE_REFRESH_EVENTS.map((type) =>
     api.event.on(type, (event) => {
       const id = eventSessionID(event)
       if (props.sessionID && id && id !== props.sessionID) return
@@ -171,7 +172,7 @@ const tui = async (api) => {
       home_prompt_right() {
         return <BranchBadge api={api} />
       },
-      session_prompt_right(props) {
+      session_prompt_right(_ctx, props) {
         return <BranchBadge api={api} sessionID={props.session_id} />
       },
     },

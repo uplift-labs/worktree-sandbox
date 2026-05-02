@@ -352,6 +352,17 @@ const readme = files.find((item) => item.file === "README.md")
 if (!readme || readme.additions < 1) throw new Error("committed diff additions were not counted")
 
 const updates = []
+const defaultObserver = core.createChangedFilesObserver({
+  getWorktree: () => worktree,
+  debounceMs: 50,
+  onChange: (update) => updates.push(update),
+})
+
+await waitFor(() => updates.some((update) => names(update.files).includes("free.txt")), 2000, "initial sidebar diff without polling")
+if (defaultObserver.status().pollMs !== 0) throw new Error("files observer should not poll by default")
+defaultObserver.close()
+updates.length = 0
+
 const observer = core.createChangedFilesObserver({
   getWorktree: () => worktree,
   env: { AISB_OPENCODE_FILES_REFRESH_MS: "200" },
